@@ -1,0 +1,10 @@
+---
+- name: Include Linux storage tasks
+  ansible.builtin.include_tasks: linux.yml
+  when: ansible_os_family != 'Windows'
+  tags: [storage]
+
+- name: Include Windows storage tasks
+  ansible.builtin.include_tasks: windows.yml
+  when: ansible_os_family == 'Windows'
+  tags: [storage]

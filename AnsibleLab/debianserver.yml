@@ -1,0 +1,314 @@
+- name: Configurar servidor Debian
+  hosts: debianserver
+  gather_facts: yes
+  become: true
+
+  vars:
+    # Interfaces (ajusta según tu VM)
+    lan_if: "enp0s3"
+    wan_if: "enp0s8"
+
+    # Dominio (Samba AD)
+    domain_name: "lab_academico.lan"
+    ad_realm: "{{ domain_name | upper }}"        # LAB_ACADEMICO.LAN
+    ad_netbios: "ACADEMICO"
+    ad_admin_password: "{{ ansible_password }}"  # Debe cumplir complejidad
+
+    # IPv4 LAN (referencia para DHCP/NAT; NO cambiamos IPs de NICs)
+    ipv4_lan_ip: "20.20.1.2"
+    ipv4_lan_prefix: 24
+    ipv4_lan_net: "20.20.1.0"
+    ipv4_mask: "255.255.255.0"
+    ipv4_router: "20.20.1.1"     # router que anunciará DHCPv4
+
+    # IPv6 LAN
+    ipv6_addr: "2025:db8:2::1"   # IP del servidor
+    ipv6_prefix: 64
+    dhcpv6_prefix: "2025:db8:2::"
+    dhcpv6_prefix_len: 64
+    dhcpv6_start: "2025:db8:2::50"
+    dhcpv6_end:   "2025:db8:2::70"
+
+    # DHCPv4 pool
+    dhcpv4_scope_name: "LANv4"
+    dhcpv4_start: "20.20.1.50"
+    dhcpv4_end:   "20.20.1.70"
+    dhcpv4_lease_days: 7
+
+    # NAT44
+    nat_name: "nat44"
+    nat_internal_prefix: "{{ ipv4_lan_net }}/{{ ipv4_lan_prefix }}"
+
+  pre_tasks:
+    - name: Actualizar índice de paquetes
+      ansible.builtin.apt:
+        update_cache: yes
+      tags: [base]
+
+  tasks:
+    # ---------------- Paquetes base ----------------
+    - name: Instalar paquetes necesarios
+      ansible.builtin.apt:
+        name:
+          - samba-ad-dc
+          - krb5-user
+          - smbclient
+          - kea-dhcp4-server
+          - kea-dhcp6-server
+          - radvd
+          - nftables
+          - apache2
+        state: present
+      tags: [base]
+
+    # ---------------- Samba AD DC (DNS interno con forwarders) ----------------
+    - name: Detener servicios Samba clásicos si existen
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: stopped
+        enabled: no
+      loop: [ "smbd", "nmbd", "winbind" ]
+      ignore_errors: yes
+      tags: [ad]
+
+    - name: Verificar si el dominio ya está aprovisionado
+      ansible.builtin.stat:
+        path: /var/lib/samba/sysvol
+      register: samba_prov
+      tags: [ad]
+    
+    - name: Eliminar smb.conf previo si existe
+      ansible.builtin.file:
+        path: /etc/samba/smb.conf
+        state: absent
+      tags: [ad]
+
+
+    - name: Provisionar dominio Samba AD DC (LAB_ACADEMICO.LAN)
+      ansible.builtin.command: >
+        samba-tool domain provision
+        --use-rfc2307
+        --realm={{ ad_realm }}
+        --domain={{ ad_netbios }}
+        --server-role=dc
+        --dns-backend=SAMBA_INTERNAL
+        --adminpass='Adm!n2025#'
+      args:
+        creates: /var/lib/samba/sysvol
+      when: not samba_prov.stat.exists
+      tags: [ad]
+
+    - name: Configurar /etc/krb5.conf para el realm
+      ansible.builtin.copy:
+        dest: /etc/krb5.conf
+        mode: '0644'
+        content: |
+          [libdefaults]
+            default_realm = {{ ad_realm }}
+            dns_lookup_realm = true
+            dns_lookup_kdc = true
+      tags: [ad]
+
+    - name: Añadir forwarders DNS en smb.conf (8.8.8.8 / 1.1.1.1)
+      ansible.builtin.lineinfile:
+        path: /etc/samba/smb.conf
+        regexp: '^\s*dns forwarder ='
+        line: '   dns forwarder = 8.8.8.8 1.1.1.1'
+        insertafter: '^\[global\]'
+      notify: Restart samba-ad-dc
+      tags: [ad]
+
+    - name: Habilitar y arrancar samba-ad-dc
+      ansible.builtin.service:
+        name: samba-ad-dc
+        state: started
+        enabled: yes
+      tags: [ad]
+
+    # ---------------- KEA DHCPv4 ----------------
+    - name: Configurar Kea DHCPv4
+      ansible.builtin.copy:
+        dest: /etc/kea/kea-dhcp4.conf
+        mode: '0644'
+        content: |
+          {
+            "Dhcp4": {
+              "interfaces-config": { "interfaces": [ "{{ lan_if }}" ] },
+              "lease-database": { "type": "memfile", "lfc-interval": 0 },
+              "valid-lifetime": 4000,
+              "subnet4": [
+                {
+                  "subnet": "{{ ipv4_lan_net }}/{{ ipv4_lan_prefix }}",
+                  "pools": [ { "pool": "{{ dhcpv4_start }} - {{ dhcpv4_end }}" } ],
+                  "option-data": [
+                    { "name": "routers", "data": "{{ ipv4_router }}" },
+                    { "name": "domain-name-servers", "data": "{{ ipv4_lan_ip }}" },
+                    { "name": "domain-name", "data": "{{ domain_name }}" }
+                  ]
+                }
+              ],
+              "control-socket": { "socket-type": "unix", "socket-name": "/run/kea/kea4-ctrl.sock" }
+            }
+          }
+      notify: Restart kea4
+      tags: [dhcp, dhcpv4]
+
+    - name: Habilitar y arrancar Kea DHCPv4
+      ansible.builtin.service:
+        name: kea-dhcp4-server
+        state: started
+        enabled: yes
+      tags: [dhcp, dhcpv4]
+
+    # ---------------- KEA DHCPv6 + RA (radvd) ----------------
+    - name: Configurar Kea DHCPv6
+      ansible.builtin.copy:
+        dest: /etc/kea/kea-dhcp6.conf
+        mode: '0644'
+        content: |
+          {
+            "Dhcp6": {
+              "interfaces-config": { "interfaces": [ "{{ lan_if }}" ] },
+              "lease-database": { "type": "memfile", "lfc-interval": 0 },
+              "preferred-lifetime": 3000,
+              "valid-lifetime": 4000,
+              "subnet6": [
+                {
+                  "subnet": "{{ dhcpv6_prefix }}/{{ dhcpv6_prefix_len }}",
+                  "pools": [ { "pool": "{{ dhcpv6_start }} - {{ dhcpv6_end }}" } ],
+                  "option-data": [
+                    { "name": "dns-servers", "data": "{{ ipv6_addr }}" },
+                    { "name": "domain-search", "data": "{{ domain_name }}" }
+                  ]
+                }
+              ],
+              "control-socket": { "socket-type": "unix", "socket-name": "/run/kea/kea6-ctrl.sock" }
+            }
+          }
+      notify: Restart kea6
+      tags: [dhcp, dhcpv6]
+
+    - name: Habilitar IPv6 forwarding
+      ansible.builtin.sysctl:
+        name: net.ipv6.conf.all.forwarding
+        value: '1'
+        state: present
+        reload: yes
+      tags: [dhcpv6, ipv6]
+
+    - name: Configurar radvd (RA para ::/64)
+      ansible.builtin.copy:
+        dest: /etc/radvd.conf
+        mode: '0644'
+        content: |
+          interface {{ lan_if }}
+          {
+            AdvSendAdvert on;
+            AdvManagedFlag on;      # usarás DHCPv6
+            AdvOtherConfigFlag on;  # opciones adicionales por DHCPv6
+            prefix {{ dhcpv6_prefix }}/{{ dhcpv6_prefix_len }}
+            {
+              AdvOnLink on;
+              AdvAutonomous on;
+            };
+          };
+      notify: Restart radvd
+      tags: [dhcpv6, ipv6]
+
+    - name: Habilitar y arrancar radvd
+      ansible.builtin.service:
+        name: radvd
+        state: started
+        enabled: yes
+      tags: [dhcpv6, ipv6]
+
+    # ---------------- NAT44 (nftables) ----------------
+    - name: Habilitar IPv4 forwarding
+      ansible.builtin.sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        state: present
+        reload: yes
+      tags: [nat]
+
+    - name: Asegurar include de snippets en nftables.conf
+      ansible.builtin.lineinfile:
+        path: /etc/nftables.conf
+        regexp: '^include "/etc/nftables.d/\*\.nft";'
+        line: 'include "/etc/nftables.d/*.nft";'
+        create: yes
+      tags: [nat]
+
+    - name: Crear directorio de reglas nftables.d
+      ansible.builtin.file:
+        path: /etc/nftables.d
+        state: directory
+        mode: '0755'
+      tags: [nat]
+
+    - name: Regla de MASQUERADE para NAT44
+      ansible.builtin.copy:
+        dest: /etc/nftables.d/ansible-nat.nft
+        mode: '0644'
+        content: |
+          table ip nat {
+            chain postrouting {
+              type nat hook postrouting priority srcnat;
+              ip saddr {{ ipv4_lan_net }}/{{ ipv4_lan_prefix }} oif "{{ wan_if }}" masquerade
+            }
+          }
+      notify: Reload nftables
+      tags: [nat]
+
+    - name: Habilitar y arrancar nftables
+      ansible.builtin.service:
+        name: nftables
+        state: started
+        enabled: yes
+      tags: [nat]
+
+    # ---------------- Web (Apache) ----------------
+    - name: Habilitar y arrancar Apache
+      ansible.builtin.service:
+        name: apache2
+        state: started
+        enabled: yes
+      tags: [web]
+
+    - name: Página de bienvenida
+      ansible.builtin.copy:
+        dest: /var/www/html/index.html
+        mode: '0644'
+        content: |
+          <html>
+          <head><title>Servidor Web Laboratorio Académico</title></head>
+          <body style="font-family:Arial; text-align:center; margin-top:50px;">
+            <h1>servidor web laboratorio academico</h1>
+            <p>AD (Samba), DNS interno, Kea DHCPv4/v6, NAT44 (nftables) y Apache configurados con Ansible.</p>
+          </body>
+          </html>
+      tags: [web]
+
+  handlers:
+    - name: Restart samba-ad-dc
+      ansible.builtin.service:
+        name: samba-ad-dc
+        state: restarted
+
+    - name: Restart kea4
+      ansible.builtin.service:
+        name: kea-dhcp4-server
+        state: restarted
+
+    - name: Restart kea6
+      ansible.builtin.service:
+        name: kea-dhcp6-server
+        state: restarted
+
+    - name: Restart radvd
+      ansible.builtin.service:
+        name: radvd
+        state: restarted
+
+    - name: Reload nftables
+      ansible.builtin.command: nft -f /etc/nftables.conf

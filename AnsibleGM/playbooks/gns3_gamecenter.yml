@@ -1,0 +1,218 @@
+---
+- name: Crear proyecto GAMECENTER y topología en GNS3 vía API
+  hosts: localhost
+  gather_facts: no
+
+  vars:
+    # == Ajusta a la IP del host remoto Windows 11 donde corre GNS3 ==
+    gns3_api_base: "http://192.168.1.50:3080/v2"
+
+    # Autenticación GNS3 (usa user/pass o token; elige SOLO uno)
+    gns3_user: "admin"
+    gns3_password: "TU_PASSWORD_GNS3"
+    gns3_token: ""   # si usas token, ponlo aquí y deja user/pass vacíos
+
+    project_name: "GAMECENTER"
+
+    # Nombres EXACTOS de VMs ya registradas en VirtualBox del host remoto
+    vbox_vm_bazzite: "Bazzite_pc03"
+    vbox_vm_win11: "Windows11pro_pc04"
+
+    # Interfaz física del host remoto que quieres exponer en Cloud
+    cloud_interface_name: "Ethernet 2"
+
+    # Nombres legibles de los nodos
+    sw_name: "Switch1"
+    cloud_name: "Ethernet"
+
+  # Helper para cabeceras segun auth
+  vars_prompt: []
+
+  tasks:
+    - name: Armar cabeceras de autenticación
+      set_fact:
+        gns3_headers: >-
+          {%- if gns3_token|length > 0 -%}
+          {{ {'Authorization': 'Bearer ' ~ gns3_token} }}
+          {%- elif gns3_user|length > 0 -%}
+          {{ {} }}
+          {%- else -%}
+          {{ {} }}
+          {%- endif -%}
+
+    - name: Chequeo de salud GNS3 API
+      uri:
+        url: "{{ gns3_api_base }}"
+        method: GET
+        headers: "{{ gns3_headers }}"
+        url_username: "{{ (gns3_token|length == 0) | ternary(gns3_user, omit) }}"
+        url_password: "{{ (gns3_token|length == 0) | ternary(gns3_password, omit) }}"
+        force_basic_auth: yes
+        return_content: yes
+        status_code: 200
+      register: ping_api
+
+    - name: Crear proyecto GAMECENTER (idempotente)
+      uri:
+        url: "{{ gns3_api_base }}/projects"
+        method: POST
+        headers: "{{ gns3_headers }}"
+        url_username: "{{ (gns3_token|length == 0) | ternary(gns3_user, omit) }}"
+        url_password: "{{ (gns3_token|length == 0) | ternary(gns3_password, omit) }}"
+        force_basic_auth: yes
+        body_format: json
+        body:
+          name: "{{ project_name }}"
+      register: project_created
+      failed_when: project_created.status not in [201, 409]   # 409 si ya existe
+      changed_when: project_created.status == 201
+
+    - name: Obtener project_id (si ya existía o se acaba de crear)
+      uri:
+        url: "{{ gns3_api_base }}/projects"
+        method: GET
+        headers: "{{ gns3_headers }}"
+        url_username: "{{ (gns3_token|length == 0) | ternary(gns3_user, omit) }}"
+        url_password: "{{ (gns3_token|length == 0) | ternary(gns3_password, omit) }}"
+        force_basic_auth: yes
+      register: projects_list
+
+    - name: Seleccionar project_id por nombre
+      set_fact:
+        project_id: "{{ (projects_list.json | selectattr('name','equalto', project_name) | list)[0].project_id }}"
+
+    # ---------- Crear nodos ----------
+    - name: Crear nodo Switch (ethernet_switch)
+      uri:
+        url: "{{ gns3_api_base }}/projects/{{ project_id }}/nodes"
+        method: POST
+        headers: "{{ gns3_headers }}"
+        url_username: "{{ (gns3_token|length == 0) | ternary(gns3_user, omit) }}"
+        url_password: "{{ (gns3_token|length == 0) | ternary(gns3_password, omit) }}"
+        force_basic_auth: yes
+        body_format: json
+        body:
+          name: "{{ sw_name }}"
+          node_type: "ethernet_switch"
+      register: sw_node
+
+    - name: Crear nodo Cloud (con interfaz física)
+      uri:
+        url: "{{ gns3_api_base }}/projects/{{ project_id }}/nodes"
+        method: POST
+        headers: "{{ gns3_headers }}"
+        url_username: "{{ (gns3_token|length == 0) | ternary(gns3_user, omit) }}"
+        url_password: "{{ (gns3_token|length == 0) | ternary(gns3_password, omit) }}"
+        force_basic_auth: yes
+        body_format: json
+        body:
+          name: "{{ cloud_name }}"
+          node_type: "cloud"
+          properties:
+            interfaces:
+              - name: "{{ cloud_interface_name }}"
+      register: cloud_node
+
+    - name: Crear nodo VBox para Bazzite (usa VM existente por nombre)
+      uri:
+        url: "{{ gns3_api_base }}/projects/{{ project_id }}/nodes"
+        method: POST
+        headers: "{{ gns3_headers }}"
+        url_username: "{{ (gns3_token|length == 0) | ternary(gns3_user, omit) }}"
+        url_password: "{{ (gns3_token|length == 0) | ternary(gns3_password, omit) }}"
+        force_basic_auth: yes
+        body_format: json
+        body:
+          name: "{{ vbox_vm_bazzite }}"
+          node_type: "vbox"
+          properties:
+            vmname: "{{ vbox_vm_bazzite }}"
+            adapters: 1
+      register: bazzite_node
+
+    - name: Crear nodo VBox para Windows 11 (usa VM existente por nombre)
+      uri:
+        url: "{{ gns3_api_base }}/projects/{{ project_id }}/nodes"
+        method: POST
+        headers: "{{ gns3_headers }}"
+        url_username: "{{ (gns3_token|length == 0) | ternary(gns3_user, omit) }}"
+        url_password: "{{ (gns3_token|length == 0) | ternary(gns3_password, omit) }}"
+        force_basic_auth: yes
+        body_format: json
+        body:
+          name: "{{ vbox_vm_win11 }}"
+          node_type: "vbox"
+          properties:
+            vmname: "{{ vbox_vm_win11 }}"
+            adapters: 1
+      register: win11_node
+
+    # ---------- Crear enlaces (links) ----------
+    # Bazzite e0 -> Switch e0
+    - name: Link Bazzite:e0 -> Switch:e0
+      uri:
+        url: "{{ gns3_api_base }}/projects/{{ project_id }}/links"
+        method: POST
+        headers: "{{ gns3_headers }}"
+        url_username: "{{ (gns3_token|length == 0) | ternary(gns3_user, omit) }}"
+        url_password: "{{ (gns3_token|length == 0) | ternary(gns3_password, omit) }}"
+        force_basic_auth: yes
+        body_format: json
+        body:
+          nodes:
+            - node_id: "{{ bazzite_node.json.node_id }}"
+              adapter_number: 0
+              port_number: 0
+            - node_id: "{{ sw_node.json.node_id }}"
+              adapter_number: 0
+              port_number: 0
+      register: link1
+
+    # Windows e0 -> Switch e1
+    - name: Link Windows11pro_pc04:e0 -> Switch:e1
+      uri:
+        url: "{{ gns3_api_base }}/projects/{{ project_id }}/links"
+        method: POST
+        headers: "{{ gns3_headers }}"
+        url_username: "{{ (gns3_token|length == 0) | ternary(gns3_user, omit) }}"
+        url_password: "{{ (gns3_token|length == 0) | ternary(gns3_password, omit) }}"
+        force_basic_auth: yes
+        body_format: json
+        body:
+          nodes:
+            - node_id: "{{ win11_node.json.node_id }}"
+              adapter_number: 0
+              port_number: 0
+            - node_id: "{{ sw_node.json.node_id }}"
+              adapter_number: 0
+              port_number: 1
+      register: link2
+
+    # Switch e2 -> Cloud (único puerto del cloud suele ser 0)
+    - name: Link Switch:e2 -> Cloud:e0
+      uri:
+        url: "{{ gns3_api_base }}/projects/{{ project_id }}/links"
+        method: POST
+        headers: "{{ gns3_headers }}"
+        url_username: "{{ (gns3_token|length == 0) | ternary(gns3_user, omit) }}"
+        url_password: "{{ (gns3_token|length == 0) | ternary(gns3_password, omit) }}"
+        force_basic_auth: yes
+        body_format: json
+        body:
+          nodes:
+            - node_id: "{{ sw_node.json.node_id }}"
+              adapter_number: 0
+              port_number: 2
+            - node_id: "{{ cloud_node.json.node_id }}"
+              adapter_number: 0
+              port_number: 0
+      register: link3
+
+    - name: Mostrar IDs creados (debug)
+      debug:
+        msg:
+          project_id: "{{ project_id }}"
+          switch_id: "{{ sw_node.json.node_id }}"
+          cloud_id: "{{ cloud_node.json.node_id }}"
+          bazzite_id: "{{ bazzite_node.json.node_id }}"
+          win11_id: "{{ win11_node.json.node_id }}"

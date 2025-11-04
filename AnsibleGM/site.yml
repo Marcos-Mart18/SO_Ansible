@@ -1,0 +1,19 @@
+---
+- name: Linux systems
+  hosts: linux_clients
+  become: true
+  gather_facts: true
+  roles:
+    - system
+    - users
+    - schedule
+    - storage
+
+- name: Windows systems
+  hosts: dc:win_clients
+  gather_facts: true
+  roles:
+    - system
+    - users
+    - schedule
+    - storage

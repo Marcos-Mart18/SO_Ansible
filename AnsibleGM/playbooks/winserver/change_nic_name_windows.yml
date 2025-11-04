@@ -1,0 +1,42 @@
+- name: Cambiar nombre de una NIC en Windows Server
+  hosts: ws2022
+  gather_facts: no
+  become: true
+
+  vars:
+    old_name: "Ethernet"   # Nombre actual
+    new_name: "LAN"          # Nuevo nombre deseado
+
+  tasks:
+    - name: Mostrar NICs detectadas
+      ansible.windows.win_powershell:
+        script: |
+          Get-NetAdapter | Select Name, Status, InterfaceDescription
+      register: nic_list
+
+    - name: Mostrar lista de interfaces
+      debug:
+        msg: "{{ nic_list.output }}"
+
+    - name: Cambiar nombre de la interfaz
+      ansible.windows.win_powershell:
+        script: |
+          $old = "{{ old_name }}"
+          $new = "{{ new_name }}"
+          $nic = Get-NetAdapter -Name $old -ErrorAction SilentlyContinue
+          if ($nic) {
+            Rename-NetAdapter -Name $old -NewName $new -PassThru | Out-String
+          } else {
+            Write-Host "No se encontró la NIC '$old'"
+          }
+      register: rename_result
+
+    - name: Confirmar cambio
+      ansible.windows.win_powershell:
+        script: |
+          Get-NetAdapter | Where-Object { $_.Name -eq "{{ new_name }}" } | Select Name, Status, InterfaceDescription
+      register: check_nic
+
+    - name: Mostrar confirmación
+      debug:
+        msg: "{{ check_nic.output }}"

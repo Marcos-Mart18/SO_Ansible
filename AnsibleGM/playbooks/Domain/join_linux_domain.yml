@@ -1,0 +1,59 @@
+- hosts: linux_clients
+  become: true
+  gather_facts: yes
+  vars:
+    domain_name: "gamecenter.lan"
+    dc_dns_v6: "2025:db8:1::2"
+    dc_dns_v4: "10.10.1.2"
+    # el paquete puede variar levemente según derivado, esto funciona en Fedora/Bazzite
+    pkgs:
+      - realmd
+      - sssd
+      - sssd-tools
+      - adcli
+      - oddjob
+      - oddjob-mkhomedir
+      - samba-common
+      - samba-common-tools
+      - krb5-workstation
+      - sssd-ad
+  tasks:
+    - name: Instalar paquetes de dominio
+      ansible.builtin.package:
+        name: "{{ pkgs }}"
+        state: present
+
+    - name: Apuntar resolv.conf al DC (temporal y simple)
+      ansible.builtin.copy:
+        dest: /etc/resolv.conf
+        content: |
+          search {{ domain_name }}
+          nameserver {{ dc_dns_v6 }}
+          nameserver {{ dc_dns_v4 }}
+        mode: '0644'
+
+    - name: Descubrir el dominio
+      ansible.builtin.command: realm discover {{ domain_name }}
+      register: discover
+      changed_when: false
+
+    - name: Unir al dominio (usando Administrator)
+      ansible.builtin.expect:
+        command: realm join --verbose {{ domain_name }} -U Administrador
+        responses:
+          (?i)Password for *: "mrk87dwp_"
+      register: join_result
+      changed_when: "'already joined' not in join_result.stdout"
+
+    - name: Habilitar creación automática de home
+      ansible.builtin.lineinfile:
+        path: /etc/sssd/sssd.conf
+        regexp: '^#?override_homedir ='
+        line: 'override_homedir = /home/%d/%u'
+      notify: restart sssd
+
+  handlers:
+    - name: restart sssd
+      ansible.builtin.service:
+        name: sssd
+        state: restarted

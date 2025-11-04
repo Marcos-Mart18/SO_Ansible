@@ -1,0 +1,62 @@
+---
+- name: Borrar usuarios locales y/o de AD (Windows Server 2022 - ES)
+  hosts: winserver
+  gather_facts: false
+
+  collections:
+    - ansible.windows
+    - microsoft.ad
+
+  vars:
+    # Usuarios locales a borrar (edita la lista)
+    borrar_locales:
+      - "soporte1"
+      - "soporte2"
+      - "invitado"
+
+    # Usuarios de dominio a borrar (opcional; ejecuta con --tags ad si tu server es DC)
+    borrar_ad:
+      - "jrivera"
+      - "mperez"
+      - "temporal"
+
+  tasks:
+    # ===== LOCAL =====
+    - name: (LOCAL) Deshabilitar antes de borrar (opcional, por sesiones abiertas)
+      ansible.windows.win_user:
+        name: "{{ item }}"
+        state: present
+        account_disabled: true
+      loop: "{{ borrar_locales }}"
+      tags: [local]
+
+    - name: (LOCAL) Borrar cuentas locales
+      ansible.windows.win_user:
+        name: "{{ item }}"
+        state: absent
+      loop: "{{ borrar_locales }}"
+      tags: [local]
+
+    - name: (LOCAL) Borrar perfil local si existe (opcional)
+      ansible.windows.win_user_profile:
+        username: "{{ item }}"
+        state: absent
+      loop: "{{ borrar_locales }}"
+      ignore_errors: true
+      tags: [local]
+
+    # ===== AD (si el host es DC) =====
+    - name: (AD) Deshabilitar antes de borrar (opcional)
+      microsoft.ad.user:
+        identity: "{{ item }}"
+        enabled: false
+        state: present
+      loop: "{{ borrar_ad }}"
+      tags: [ad]
+
+    - name: (AD) Borrar cuentas de dominio
+      microsoft.ad.user:
+        identity: "{{ item }}"
+        state: absent
+      loop: "{{ borrar_ad }}"
+      tags: [ad]

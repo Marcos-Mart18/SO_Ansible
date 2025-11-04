@@ -1,0 +1,34 @@
+- name: Cambiar nombre de una NIC en Bazzite (Linux)
+  hosts: bazzite
+  gather_facts: yes
+  become: true
+
+  vars:
+    old_name: "enp1s0"    # Nombre actual (usa `ip link` para confirmarlo)
+    new_name: "lan0"      # Nuevo nombre deseado
+
+  tasks:
+    - name: Mostrar interfaces detectadas
+      ansible.builtin.shell: ip link show
+      register: nic_list
+      changed_when: false
+
+    - name: Mostrar lista de NICs
+      debug:
+        msg: "{{ nic_list.stdout_lines }}"
+
+    - name: Cambiar nombre de la interfaz
+      ansible.builtin.shell: |
+        ip link set {{ old_name }} down
+        ip link set {{ old_name }} name {{ new_name }}
+        ip link set {{ new_name }} up
+      register: rename_result
+
+    - name: Confirmar cambio
+      ansible.builtin.shell: ip link show {{ new_name }}
+      register: check_nic
+      changed_when: false
+
+    - name: Mostrar resultado final
+      debug:
+        msg: "{{ check_nic.stdout_lines }}"

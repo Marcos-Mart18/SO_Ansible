@@ -1,0 +1,13 @@
+---
+- name: Manage scheduled tasks
+  ansible.windows.win_scheduled_task:
+    name: "{{ item.name }}"
+    description: "{{ item.description | default(omit) }}"
+    enabled: "{{ item.enabled | default(true) }}"
+    actions: "{{ item.actions }}"
+    triggers: "{{ item.triggers }}"
+    username: "{{ item.username | default(omit) }}"
+    password: "{{ item.password | default(omit) }}"
+    state: "{{ item.state | default('present') }}"
+  loop: "{{ win_scheduled | default([]) }}"
+  tags: [schedule]

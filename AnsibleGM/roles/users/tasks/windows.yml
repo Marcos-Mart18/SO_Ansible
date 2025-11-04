@@ -1,0 +1,18 @@
+---
+- name: Ensure local groups exist
+  ansible.windows.win_group:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ (win_local_users | default([]) | selectattr('groups','defined') | map(attribute='groups') | list | flatten | unique) | default([]) }}"
+  tags: [users]
+
+- name: Ensure local users are managed
+  ansible.windows.win_user:
+    name: "{{ item.name }}"
+    password: "{{ item.password | default(omit) }}"
+    groups: "{{ item.groups | default(omit) }}"
+    state: "{{ item.state | default('present') }}"
+    password_never_expires: "{{ item.password_never_expires | default(true) }}"
+    update_password: on_create
+  loop: "{{ win_local_users | default([]) }}"
+  tags: [users]

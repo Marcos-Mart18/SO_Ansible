@@ -1,0 +1,119 @@
+---
+- name: Administración de almacenamiento y sistemas de archivos (WS2022 - ES)
+  hosts: winserver
+  gather_facts: false
+
+  collections:
+    - ansible.windows
+
+  vars:
+    # === Parámetros de volumen físico ===
+    disk_number: 1                   # Disco físico a usar (Get-Disk para listar)
+    drive_letter: "D"
+    volume_label: "DATOS"
+    filesystem: "NTFS"
+
+    # === Estructura de carpetas ===
+    root_path: "D:\\Datos"
+    folders:
+      - "D:\\Datos\\Departamentos"
+      - "D:\\Datos\\Usuarios"
+      - "D:\\Datos\\Proyectos"
+
+    # === Compartición SMB ===
+    smb_share_name: "Datos$"         # $ = oculta
+    smb_share_desc: "Repositorio de datos"
+    smb_share_path: "D:\\Datos"
+    smb_full_access:
+      - "Administradores"            # usa SIDs si tu server no es ES
+    smb_change_access:
+      - "Usuarios de escritorio remoto"
+
+    # === Cuotas (FSRM) ===
+    quota_path: "D:\\Datos\\Usuarios"
+    quota_size_gb: 50
+
+    # === VHDX opcional ===
+    vhdx_path: "D:\\VHDs\\Datos.vhdx"
+    vhdx_size_gb: 20
+    vhdx_drive_letter: "V"
+
+  tasks:
+    # ======================= VOLÚMENES / PARTICIONES =======================
+    - name: (VOL) Crear volumen en disco {{ disk_number }} con letra {{ drive_letter }} (idempotente)
+      ansible.windows.win_powershell:
+        script: |
+          $diskNum = {{ disk_number }}
+          $drive   = "{{ drive_letter }}"
+          $label   = "{{ volume_label }}"
+          $fs      = "{{ filesystem }}"
+
+          $vol = Get-Volume -DriveLetter $drive -ErrorAction SilentlyContinue
+          if (-not $vol) {
+            $d = Get-Disk -Number $diskNum -ErrorAction Stop
+            if ($d.IsReadOnly) { Set-Disk -Number $diskNum -IsReadOnly $false }
+            if ($d.IsOffline)  { Set-Disk -Number $diskNum -IsOffline  $false }
+            if ($d.PartitionStyle -eq 'RAW') { Initialize-Disk -Number $diskNum -PartitionStyle GPT -ErrorAction Stop }
+            $part = New-Partition -DiskNumber $diskNum -UseMaximumSize -DriveLetter $drive -IsActive:$true
+            Format-Volume -Partition $part -FileSystem $fs -NewFileSystemLabel $label -Confirm:$false | Out-Null
+          }
+      tags: [volume]
+
+    # ======================= SISTEMA DE ARCHIVOS (CARPETAS) =================
+    - name: (FS) Crear carpetas base
+      ansible.windows.win_file:
+        path: "{{ item }}"
+        state: directory
+      loop: "{{ folders }}"
+      tags: [fs]
+
+    # ======================= ACL BÁSICAS (opcional) =========================
+    - name: (ACL) Conceder Full Control a Administradores sobre {{ root_path }}
+      ansible.windows.win_acl:
+        path: "{{ root_path }}"
+        user: "S-1-5-32-544"   # Administradores (SID evita problemas de idioma)
+        rights: FullControl
+        type: allow
+        inherit: ContainerInherit, ObjectInherit
+        propagation: None
+        state: present
+      tags: [acl]
+
+    # ======================= COMPARTICIÓN SMB ===============================
+    - name: (SMB) Crear/asegurar recurso compartido {{ smb_share_name }}
+      ansible.windows.win_share:
+        name: "{{ smb_share_name }}"
+        description: "{{ smb_share_desc }}"
+        path: "{{ smb_share_path }}"
+        state: present
+        full: "{{ smb_full_access }}"
+        change: "{{ smb_change_access }}"
+      tags: [smb]
+
+    # ======================= CUOTAS (FSRM) ==================================
+    - name: (FSRM) Instalar FSRM (Administrador de recursos del servidor de archivos)
+      ansible.windows.win_feature:
+        name: FS-Resource-Manager
+        state: present
+        include_management_tools: yes
+      tags: [quota]
+
+    - name: (FSRM) Crear/actualizar cuota de {{ quota_size_gb }} GB en {{ quota_path }}
+      ansible.windows.win_powershell:
+        script: |
+          Import-Module FileServerResourceManager -ErrorAction Stop
+          $path = "{{ quota_path }}"
+          $size = {{ quota_size_gb }}GB
+          if (-not (Test-Path $path)) { New-Item -ItemType Directory -Path $path -Force | Out-Null }
+          $q = Get-FsrmQuota -Path $path -ErrorAction SilentlyContinue
+          if ($q) {
+            if ($q.Size -ne $size) { Set-FsrmQuota -Path $path -Size $size -SoftLimit:$false }
+          } else {
+            New-FsrmQuota -Path $path -Size $size -SoftLimit:$false | Out-Null
+          }
+      tags: [quota]
+
+    # ======================= VHDX (OPCIONAL) ================================
+    - name: (VHDX) Crear/montar VHDX {{ vhdx_path }} con letra {{ vhdx_drive_letter }}
+      ansible.windows.win_powershell:
+        script: |

@@ -1,0 +1,7 @@
+- name: Instalar y configurar antivirus en Windows
+  hosts: windows
+  tasks:
+    - name: Asegurar que Windows Defender está habilitado
+      win_service:
+        name: "WinDefend"
+        state: started

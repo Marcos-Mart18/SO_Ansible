@@ -1,0 +1,8 @@
+- name: Configurar prácticas seguras de usuario en Linux (Bazzite)
+  hosts: linux_clients
+  tasks:
+    - name: Configurar bloqueo automático tras inactividad
+      lineinfile:
+        path: /etc/profile
+        regexp: '^TMOUT'
+        line: 'TMOUT=600'

@@ -1,0 +1,12 @@
+- name: Instalar y configurar antivirus en Linux (Bazzite)
+  hosts: linux_clients
+  tasks:
+    - name: Instalar ClamAV (Antivirus)
+      apt:
+        name: clamav
+        state: present
+    - name: Asegurar que ClamAV está habilitado
+      service:
+        name: clamav-freshclam
+        state: started
+        enabled: yes

@@ -1,0 +1,69 @@
+---
+- hosts: macos_clients,gns3_macos
+  gather_facts: yes
+  become: true
+  vars:
+    domain_name: "gamecenter.lan"
+    domain_admin_user: "GAMECENTER\\Administrador"
+    domain_admin_pass: "mrk87dwp_"
+    dc_dns_v4: "10.10.1.2"
+    dc_dns_v6: "2025:db8:1::2"     # opcional
+    nic_service: "Ethernet"         # nombre del servicio de red en macOS (p.ej. "Wi-Fi", "Ethernet")
+    computer_id: "{{ ansible_hostname }}"
+    computer_name: "{{ ansible_hostname }}"
+    ou_path: ""                     # opcional, ejemplo: "OU=Macs,OU=Clients,DC=GAMECENTER,DC=lan"
+    enable_mobile: true              # cuentas móviles (login fuera de la red)
+    local_home: true                 # home local en el equipo
+    use_unc: false                   # rutas UNC para home
+    ad_admin_groups: []              # ejemplo: ["GAMECENTER\\Domain Admins", "GAMECENTER\\IT Support"]
+    reboot_after_join: false
+
+  tasks:
+    - name: Construir lista de DNS (v4 + v6 si aplica)
+      ansible.builtin.set_fact:
+        dns_list: "{{ [dc_dns_v4] + ([dc_dns_v6] if (dc_dns_v6 is defined and (dc_dns_v6|length)>0) else []) }}"
+
+    - name: Configurar DNS del servicio de red
+      ansible.builtin.shell: >
+        /usr/sbin/networksetup -setdnsservers "{{ nic_service }}" {{ dns_list | join(' ') }}
+      changed_when: true
+
+    - name: Establecer nombre del equipo (ComputerName, LocalHostName, HostName)
+      ansible.builtin.shell: |
+        /usr/sbin/scutil --set ComputerName "{{ computer_name }}"
+        /usr/sbin/scutil --set LocalHostName "{{ computer_name | regex_replace('[^A-Za-z0-9-]', '-') }}"
+        /usr/sbin/scutil --set HostName "{{ computer_name }}"
+      changed_when: true
+
+    - name: Consultar estado de unión a AD
+      ansible.builtin.command: /usr/sbin/dsconfigad -show
+      register: ad_show
+      failed_when: false
+      changed_when: false
+
+    - name: Unir a dominio (con OU si está definida)
+      ansible.builtin.shell: >
+        /usr/sbin/dsconfigad -add "{{ domain_name }}"
+        -username "{{ domain_admin_user }}"
+        -password "{{ domain_admin_pass }}"
+        -computer "{{ computer_id }}"
+        {{ '-ou "' + ou_path + '"' if (ou_path|default('')|length>0) else '' }}
+        {{ '-mobile enable' if enable_mobile else '-mobile disable' }}
+        {{ '-localhome enable' if local_home else '-localhome disable' }}
+        {{ '-useuncpath enable' if use_unc else '-useuncpath disable' }}
+      args:
+        warn: false
+      register: join_out
+      when: domain_name not in ad_show.stdout
+
+    - name: Conceder privilegios de admin local a grupos de AD
+      ansible.builtin.command: >
+        /usr/sbin/dseditgroup -o edit -a "{{ item }}" -t group admin
+      loop: "{{ ad_admin_groups }}"
+      when: ad_admin_groups | length > 0
+
+    - name: Reiniciar si se solicita
+      ansible.builtin.reboot:
+        msg: "Reinicio tras unir al dominio por petición del playbook"
+        reboot_timeout: 600
+      when: reboot_after_join | bool

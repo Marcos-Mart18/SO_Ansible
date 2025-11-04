@@ -1,0 +1,17 @@
+- name: Configurar firewall en Ubuntu
+  hosts: ubuntu_clients
+  tasks:
+    - name: Asegurar que UFW está habilitado
+      ufw:
+        state: enabled
+        logging: yes
+    - name: Permitir ICMPv4
+      ufw:
+        rule: allow in from any to any proto icmp
+        name: "PINGv4"
+        state: enabled
+    - name: Permitir ICMPv6
+      ufw:
+        rule: allow in from any to any proto ipv6-icmp
+        name: "PINGv6"
+        state: enabled

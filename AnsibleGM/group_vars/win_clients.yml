@@ -1,0 +1,6 @@
+---
+system_show_processes: false
+win_services_enable: []
+win_local_users: []
+win_scheduled: []
+win_volumes: []

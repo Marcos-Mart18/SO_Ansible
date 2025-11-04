@@ -1,0 +1,21 @@
+---
+- name: Verificar servicios críticos en Debian Server
+  hosts: debianserver
+  become: true
+  gather_facts: yes
+
+  tasks:
+    - name: Obtener hechos de servicios
+      ansible.builtin.service_facts:
+
+    - name: Mostrar resumen de estado de servicios
+      ansible.builtin.debug:
+        msg:
+          - "🧩 Samba AD DC:        {{ (ansible_facts.services['samba-ad-dc.service'].state | default('no instalado')) }}"
+          - "💡 Kea DHCPv4:         {{ (ansible_facts.services['kea-dhcp4-server.service'].state | default('no instalado')) }}"
+          - "🌐 Kea DHCPv6:         {{ (ansible_facts.services['kea-dhcp6-server.service'].state | default('no instalado')) }}"
+          - "📡 Radvd (IPv6 RA):    {{ (ansible_facts.services['radvd.service'].state | default('no instalado')) }}"
+          - "🔥 nftables (NAT):     {{ (ansible_facts.services['nftables.service'].state | default('no instalado')) }}"
+          - "🌍 Apache2 (Web):      {{ (ansible_facts.services['apache2.service'].state | default('no instalado')) }}"
+          - "⚙️ Estado general:     'running' indica servicio activo ✅"
+      tags: [verify]

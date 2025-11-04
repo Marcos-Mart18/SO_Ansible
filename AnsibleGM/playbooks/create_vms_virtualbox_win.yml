@@ -1,0 +1,158 @@
+---
+- name: Crear 2 VMs en VirtualBox (host remoto Windows 11)
+  hosts: gns3_host
+  gather_facts: no
+
+  vars:
+    # Ajusta estas rutas a donde realmente tienes las ISOs en la PC remota
+    iso_dir: 'C:\Users\Public\ISOs'
+    iso_bazzite: 'bazzite-stable-amd64.iso'
+    iso_win11: 'Win11_25H2_Spanish_x64.iso'
+
+    # Carpeta por defecto de VMs de VirtualBox en Windows (suele ser esta)
+    vbox_vm_home: 'C:\Users\Public\VirtualBox VMs'
+
+    # VM 1 - Bazzite (Linux)
+    vm1:
+      name: 'Bazzite_pc03'
+      ostype: 'Linux_64'
+      ram_mb: 4096
+      cpus: 4
+      disk_gb: 60
+      user: 'bazzite_pc03'
+      hostname: 'bazzite_pc03'
+      password: 'mrk87dwp_'
+      iso: "{{ iso_dir }}\\{{ iso_bazzite }}"
+      vdi: "{{ vbox_vm_home }}\\{{ vm1.name }}\\{{ vm1.name }}.vdi"
+
+    # VM 2 - Windows 11
+    vm2:
+      name: 'Windows11pro_pc04'
+      ostype: 'Windows11_64'
+      ram_mb: 4096
+      cpus: 4
+      disk_gb: 60
+      user: 'windows11pro_pc03'
+      hostname: 'windows11pro_pc03'
+      password: 'mrk87dwp_'
+      iso: "{{ iso_dir }}\\{{ iso_win11 }}"
+      vdi: "{{ vbox_vm_home }}\\{{ vm2.name }}\\{{ vm2.name }}.vdi"
+
+  tasks:
+
+    - name: Comprobar que VBoxManage existe
+      ansible.windows.win_command: 'cmd /c "VBoxManage --version"'
+      register: vbox_ver
+      failed_when: vbox_ver.rc != 0
+      changed_when: false
+
+    ######################################################################
+    # VM 1: Bazzite_pc03
+    ######################################################################
+
+    - name: ¿Existe VM1?
+      ansible.windows.win_command: 'cmd /c "VBoxManage list vms | findstr /I \"{{ vm1.name }}\""'
+      register: vm1_exists
+      changed_when: false
+      failed_when: false
+
+    - name: Crear VM1 (si no existe)
+      ansible.windows.win_command: 'cmd /c "VBoxManage createvm --name {{ vm1.name }} --ostype {{ vm1.ostype }} --register"'
+      when: vm1_exists.rc != 0
+
+    - name: Configurar recursos VM1
+      ansible.windows.win_command: >
+        cmd /c "VBoxManage modifyvm {{ vm1.name }}
+        --memory {{ vm1.ram_mb }} --cpus {{ vm1.cpus }}
+        --vram 16 --graphics-controller VMSVGA
+        --ioapic on --nic1 nat --boot1 dvd --boot2 disk"
+      when: vm1_exists.rc != 0
+
+    - name: Crear disco VM1
+      ansible.windows.win_command: >
+        cmd /c "VBoxManage createhd --filename \"{{ vm1.vdi }}\" --size {{ vm1.disk_gb | int * 1024 }} --format VDI"
+      args:
+        creates: "{{ vm1.vdi }}"
+
+    - name: Crear controladora SATA VM1
+      ansible.windows.win_command: >
+        cmd /c "VBoxManage storagectl {{ vm1.name }} --name \"SATA\" --add sata --controller IntelAhci --portcount 3 --bootable on"
+
+    - name: Adjuntar disco a VM1
+      ansible.windows.win_command: >
+        cmd /c "VBoxManage storageattach {{ vm1.name }} --storagectl \"SATA\" --port 0 --device 0 --type hdd --medium \"{{ vm1.vdi }}\""
+
+    - name: Adjuntar ISO a VM1
+      ansible.windows.win_command: >
+        cmd /c "VBoxManage storageattach {{ vm1.name }} --storagectl \"SATA\" --port 1 --device 0 --type dvddrive --medium \"{{ vm1.iso }}\""
+
+    # Instalación desatendida (Linux) – si falla, quedará con la ISO montada para instalar manualmente.
+    - name: Intentar instalación desatendida Linux (VM1)
+      ansible.windows.win_command: >
+        cmd /c "VBoxManage unattended install {{ vm1.name }}
+        --iso \"{{ vm1.iso }}\"
+        --user {{ vm1.user }} --password {{ vm1.password }}
+        --full-user-name {{ vm1.user }} --hostname {{ vm1.hostname }}
+        --locale es-PE --country PE --time-zone America/Lima
+        --install-additions --start-vm=headless"
+      register: vm1_unattended
+      failed_when: false
+
+    ######################################################################
+    # VM 2: Windows11pro_pc04
+    ######################################################################
+
+    - name: ¿Existe VM2?
+      ansible.windows.win_command: 'cmd /c "VBoxManage list vms | findstr /I \"{{ vm2.name }}\""'
+      register: vm2_exists
+      changed_when: false
+      failed_when: false
+
+    - name: Crear VM2 (si no existe)
+      ansible.windows.win_command: 'cmd /c "VBoxManage createvm --name {{ vm2.name }} --ostype {{ vm2.ostype }} --register"'
+      when: vm2_exists.rc != 0
+
+    - name: Configurar recursos VM2 (EFI ON, TPM si está disponible)
+      ansible.windows.win_command: >
+        cmd /c "VBoxManage modifyvm {{ vm2.name }}
+        --memory {{ vm2.ram_mb }} --cpus {{ vm2.cpus }}
+        --vram 64 --graphics-controller VMSVGA
+        --ioapic on --firmware efi --nic1 nat --boot1 dvd --boot2 disk"
+      when: vm2_exists.rc != 0
+
+    # Intento habilitar TPM 2.0 (VirtualBox 7+). Si no está soportado, no fallar.
+    - name: Habilitar TPM 2.0 en VM2 (si es soportado)
+      ansible.windows.win_command: >
+        cmd /c "VBoxManage modifyvm {{ vm2.name }} --tpm-type 2.0"
+      register: vm2_tpm
+      failed_when: false
+      changed_when: vm2_tpm.rc == 0
+
+    - name: Crear disco VM2
+      ansible.windows.win_command: >
+        cmd /c "VBoxManage createhd --filename \"{{ vm2.vdi }}\" --size {{ vm2.disk_gb | int * 1024 }} --format VDI"
+      args:
+        creates: "{{ vm2.vdi }}"
+
+    - name: Crear controladora SATA VM2
+      ansible.windows.win_command: >
+        cmd /c "VBoxManage storagectl {{ vm2.name }} --name \"SATA\" --add sata --controller IntelAhci --portcount 3 --bootable on"
+
+    - name: Adjuntar disco a VM2
+      ansible.windows.win_command: >
+        cmd /c "VBoxManage storageattach {{ vm2.name }} --storagectl \"SATA\" --port 0 --device 0 --type hdd --medium \"{{ vm2.vdi }}\""
+
+    - name: Adjuntar ISO a VM2
+      ansible.windows.win_command: >
+        cmd /c "VBoxManage storageattach {{ vm2.name }} --storagectl \"SATA\" --port 1 --device 0 --type dvddrive --medium \"{{ vm2.iso }}\""
+
+    # NOTA: La instalación desatendida de Windows 11 con VBoxManage suele requerir clave/licencia y opciones extras.
+    # Dejamos la ISO montada. Si quieres intentar desatendida, descomenta y ajusta (puede requerir Product Key):
+    # - name: Intentar instalación desatendida Windows 11 (puede requerir PK)
+    #   ansible.windows.win_command: >
+    #     cmd /c "VBoxManage unattended install {{ vm2.name }}
+    #     --iso \"{{ vm2.iso }}\"
+    #     --user {{ vm2.user }} --password {{ vm2.password }}
+    #     --full-user-name {{ vm2.user }} --hostname {{ vm2.hostname }}
+    #     --locale es-ES --time-zone America/Lima --start-vm=headless"
+    #   failed_when: false

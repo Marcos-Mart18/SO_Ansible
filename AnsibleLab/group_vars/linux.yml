@@ -1,0 +1,4 @@
+---
+linux_common_packages:
+  - htop
+  - git

@@ -1,0 +1,40 @@
+---
+- name: Ensure supplemental groups exist
+  ansible.builtin.group:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ (linux_users | default([]) | selectattr('groups','defined') | map(attribute='groups') | list | flatten | unique) | default([]) }}"
+  tags: [users]
+
+- name: Ensure primary groups exist
+  ansible.builtin.group:
+    name: "{{ item.name }}"
+    state: present
+  loop: "{{ linux_users | default([]) }}"
+  tags: [users]
+
+- name: Ensure users are managed
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    uid: "{{ item.uid | default(omit) }}"
+    groups: "{{ item.groups | default(omit) }}"
+    state: "{{ item.state | default('present') }}"
+    password: "{{ item.password | default(omit) }}"
+    shell: "{{ item.shell | default(omit) }}"
+    create_home: "{{ item.create_home | default(true) }}"
+  loop: "{{ linux_users | default([]) }}"
+  notify: restart sssd
+  tags: [users]
+
+- name: Manage sudoers entries for users with sudo
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/{{ item.name }}"
+    content: "{{ item.sudo_rule | default(item.name ~ ' ALL=(ALL) NOPASSWD:ALL') }}"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: "visudo -cf %s"
+  when: item.sudo | default(false)
+  loop: "{{ linux_users | default([]) }}"
+  notify: restart sssd
+  tags: [users]

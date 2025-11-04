@@ -1,0 +1,26 @@
+---
+- name: Initialize disks
+  ansible.windows.win_disk_initialize:
+    disk_number: "{{ item.disk_number }}"
+    style: "{{ item.style | default('gpt') }}"
+  loop: "{{ win_volumes | default([]) }}"
+  when: item.initialize | default(true)
+  tags: [storage]
+
+- name: Create partitions
+  ansible.windows.win_partition:
+    disk_number: "{{ item.disk_number }}"
+    drive_letter: "{{ item.drive_letter | default(omit) }}"
+    partition_size: "{{ item.partition_size | default('max') }}"
+    gpt_type: "{{ item.gpt_type | default(omit) }}"
+  loop: "{{ win_volumes | default([]) }}"
+  tags: [storage]
+
+- name: Format volumes
+  ansible.windows.win_format:
+    drive_letter: "{{ item.drive_letter }}"
+    file_system: "{{ item.fs_type | default('NTFS') }}"
+    new_label: "{{ item.label | default(omit) }}"
+    allocation_unit_size: "{{ item.allocation_unit_size | default(omit) }}"
+  loop: "{{ win_volumes | default([]) }}"
+  tags: [storage]

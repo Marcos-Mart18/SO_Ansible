@@ -1,0 +1,39 @@
+---
+- name: Configurar reglas de firewall para ICMPv4 e ICMPv6 en Windows 11 Pro
+  hosts:
+    - win_clients
+    - winserver
+  tasks:
+    - name: Crear regla de entrada para ICMPv4
+      win_firewall_rule:
+        name: PINGv4
+        enable: yes
+        direction: in
+        localport: any
+        remoteport: any
+        protocol: ICMPv4
+        action: allow
+        localaddress: any
+        remoteaddress: any
+        profile:
+          - Domain
+          - Private
+          - Public
+        description: "Permitir ICMPv4 (Ping)"
+        
+    - name: Crear regla de entrada para ICMPv6
+      win_firewall_rule:
+        name: PINGv6
+        enable: yes
+        direction: in
+        localport: any
+        remoteport: any
+        protocol: ICMPv6
+        action: allow
+        localaddress: any
+        remoteaddress: any
+        profile:
+          - Domain
+          - Private
+          - Public
+        description: "Permitir ICMPv6 (Ping)"

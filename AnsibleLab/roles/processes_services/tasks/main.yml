@@ -1,0 +1,30 @@
+---
+# Gestión de procesos y servicios
+- name: Gather service facts (non-Windows)
+  ansible.builtin.service_facts:
+  when: ansible_os_family != 'Windows'
+
+- name: Ensure services state on Linux/macOS
+  ansible.builtin.service:
+    name: "{{ item.name }}"
+    state: "{{ item.state | default('started') }}"
+    enabled: "{{ item.enabled | default(true) }}"
+  loop: "{{ services_to_ensure | default([]) }}"
+  when: ansible_os_family != 'Windows'
+
+- name: Ensure services state on Windows
+  ansible.windows.win_service:
+    name: "{{ item.name }}"
+    state: "{{ item.state | default('started') }}"
+    start_mode: "{{ 'auto' if (item.enabled | default(true)) else 'manual' }}"
+  loop: "{{ services_to_ensure | default([]) }}"
+  when: ansible_os_family == 'Windows'
+
+- name: Install basic monitoring tools on Linux/macOS
+  ansible.builtin.package:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - procps
+    - htop
+  when: ansible_os_family != 'Windows'

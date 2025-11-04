@@ -1,0 +1,136 @@
+- hosts: localhost
+  gather_facts: no
+  collections: [community.vmware]
+
+  vars:
+    # === Conexión ESXi ===
+    esxi_host: "168.121.48.254:10120"
+    esxi_user: "{{ esxi_user | default('root') }}"
+    esxi_pass: "{{ esxi_pass }}"
+    validate_certs: false
+    esxi_hostname_fqdn: "localhost.lim.upeu.edu.pe"   # host ESXi donde crear las VMs
+    ds_name: "datastore1"
+    datacenter_name: "ha-datacenter"
+
+    # Carpeta en el datastore donde dejaste los OVF/VMDK
+    ds_folder_base: "MartinezG01VI/backups"
+
+    # Portgroups
+    pg_main: "vSW_G01"
+    pg_extra: "VM Network"   # 2da NIC solo para Windows Server
+
+    # OJO: pon aquí los **nombres reales de los VMDK** (los puedes ver en el OVF o en el datastore).
+    vms:
+      - name: "Bazzite_pc01"
+        guest_id: "ubuntu64Guest"
+        memory_mb: 8192
+        num_cpus: 4
+        firmware: "efi"          # opcional; si tu backup iba en BIOS, quítalo
+        networks:
+          - name: "{{ pg_main }}"
+            start_connected: true
+            device_type: vmxnet3
+        disks:
+          - filename: "[{{ ds_name }}] {{ ds_folder_base }}/Bazzite_pc01/Bazzite_pc01-disk1.vmdk"
+            type: thin
+            controller_number: 0
+            unit_number: 0
+        scsi: paravirtual         # Linux: paravirtual (ó lsilogic si tu VMDK lo requiere)
+
+      - name: "Windows11pro_pc01"
+        guest_id: "windows11_64Guest"   # si no está en tu ESXi, usa 'windows9_64Guest'
+        memory_mb: 8192
+        num_cpus: 4
+        firmware: "efi"
+        networks:
+          - name: "{{ pg_main }}"
+            start_connected: true
+            device_type: vmxnet3
+        disks:
+          - filename: "[{{ ds_name }}] {{ ds_folder_base }}/Windows11pro_pc01/Windows11pro_pc01-disk1.vmdk"
+            type: thin
+            controller_number: 0
+            unit_number: 0
+        scsi: lsilogic             # Windows suele ir bien con LSI Logic (o lsilogic_sas en OVF originales)
+
+      - name: "WindowsSERVER2022_G01"
+        guest_id: "windows2019srv_64Guest"  # si tu ESXi no trae 2022; de lo contrario usa windows2019srvNext_64Guest o el que corresponda
+        memory_mb: 8192
+        num_cpus: 4
+        firmware: "efi"
+        networks:
+          - name: "{{ pg_main }}"
+            start_connected: true
+            device_type: vmxnet3
+          - name: "{{ pg_extra }}"
+            start_connected: true
+            device_type: vmxnet3
+        disks:
+          - filename: "[{{ ds_name }}] {{ ds_folder_base }}/WindowsSERVER2022_G01/WindowsSERVER2022_G01-disk1.vmdk"
+            type: thin
+            controller_number: 0
+            unit_number: 0
+        scsi: lsilogic
+
+  tasks:
+    - name: Desplegar VMs desde VMDK existentes (idempotente)
+      community.vmware.vmware_guest:
+        hostname: "{{ esxi_host }}"
+        username: "{{ esxi_user }}"
+        password: "{{ esxi_pass }}"
+        validate_certs: "{{ validate_certs }}"
+        esxi_hostname: "{{ esxi_hostname_fqdn }}"
+        datacenter: "{{ datacenter_name }}"
+        folder: "/"
+        name: "{{ item.name }}"
+        state: present
+        guest_id: "{{ item.guest_id }}"
+        datastore: "{{ ds_name }}"
+        hardware:
+          memory_mb: "{{ item.memory_mb }}"
+          num_cpus: "{{ item.num_cpus }}"
+          scsi: "{{ item.scsi }}"
+          boot_firmware: "{{ item.firmware | default(omit) }}"
+        networks: "{{ item.networks }}"
+        # Adjunta VMDK ya existente en datastore
+        disk: "{{ item.disks }}"
+        wait_for_ip_address: no
+        state_change_timeout: 300
+      loop: "{{ vms }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Encender VMs
+      community.vmware.vmware_guest:
+        hostname: "{{ esxi_host }}"
+        username: "{{ esxi_user }}"
+        password: "{{ esxi_pass }}"
+        validate_certs: "{{ validate_certs }}"
+        esxi_hostname: "{{ esxi_hostname_fqdn }}"
+        datacenter: "{{ datacenter_name }}"
+        folder: "/"
+        name: "{{ item.name }}"
+        state: poweredon
+      loop: "{{ vms }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Ver info final de cada VM
+      community.vmware.vmware_guest_info:
+        hostname: "{{ esxi_host }}"
+        username: "{{ esxi_user }}"
+        password: "{{ esxi_pass }}"
+        validate_certs: "{{ validate_certs }}"
+        name: "{{ item.name }}"
+      register: infos
+      loop: "{{ vms }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Dump breve (discos y NICs)
+      debug:
+        msg:
+          - "VM: {{ item.invocation.module_args.name }}"
+          - "Discos: {{ (item.instance.hw_files | default([])) }}"
+          - "NICs: {{ (item.instance.networks | default([])) }}"
+      loop: "{{ infos.results }}"

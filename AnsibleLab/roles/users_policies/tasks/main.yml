@@ -1,0 +1,34 @@
+---
+# Administración de usuarios, permisos y políticas
+- name: Ensure groups exist (Linux/macOS)
+  ansible.builtin.group:
+    name: "{{ item.name }}"
+    state: present
+  loop: "{{ groups | default([]) }}"
+  when: ansible_os_family != 'Windows'
+
+- name: Ensure users exist (Linux/macOS)
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    groups: "{{ item.groups | default(omit) }}"
+    password: "{{ item.password | default(omit) }}"
+    shell: "{{ item.shell | default(omit) }}"
+    state: present
+  loop: "{{ users | default([]) }}"
+  when: ansible_os_family != 'Windows'
+
+- name: Ensure groups exist (Windows)
+  ansible.windows.win_group:
+    name: "{{ item.name }}"
+    state: present
+  loop: "{{ groups | default([]) }}"
+  when: ansible_os_family == 'Windows'
+
+- name: Ensure users exist (Windows)
+  ansible.windows.win_user:
+    name: "{{ item.name }}"
+    password: "{{ item.password | default(omit) }}"
+    groups: "{{ item.groups | default(omit) }}"
+    state: present
+  loop: "{{ users | default([]) }}"
+  when: ansible_os_family == 'Windows'

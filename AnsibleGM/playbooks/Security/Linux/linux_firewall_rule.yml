@@ -1,0 +1,17 @@
+---
+- name: Configurar reglas de firewall para ICMPv4 e ICMPv6 en máquinas con Bazzite
+  hosts: linux_clients  # Aplica solo a los hosts dentro del grupo linux_clients
+  tasks:
+    - name: Crear regla de entrada para ICMPv4
+      ufw:
+        rule: allow in from any to any proto icmp
+        name: PINGv4
+        state: enabled
+        comment: "Permitir ICMPv4 (Ping)"
+        
+    - name: Crear regla de entrada para ICMPv6
+      ufw:
+        rule: allow in from any to any proto ipv6-icmp
+        name: PINGv6
+        state: enabled
+        comment: "Permitir ICMPv6 (Ping)"

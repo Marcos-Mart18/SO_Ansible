@@ -1,0 +1,13 @@
+- name: Configurar políticas de contraseñas seguras en Linux
+  hosts: linux_clients
+  tasks:
+    - name: Establecer longitud mínima de contraseña
+      lineinfile:
+        path: /etc/login.defs
+        regexp: '^PASS_MIN_LEN'
+        line: 'PASS_MIN_LEN   14'
+    - name: Asegurar que la complejidad de la contraseña está habilitada
+      lineinfile:
+        path: /etc/pam.d/common-password
+        regexp: '^password requisite pam_cracklib.so'
+        line: 'password requisite pam_cracklib.so retry=3 minlen=14'

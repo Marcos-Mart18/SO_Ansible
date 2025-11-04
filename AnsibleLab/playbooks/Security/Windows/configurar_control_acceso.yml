@@ -1,0 +1,11 @@
+- name: Configurar políticas de contraseñas seguras en Windows
+  hosts: windows
+  tasks:
+    - name: Establecer política de contraseñas mínimas
+      win_security_policy:
+        name: "MinimumPasswordLength"
+        option_value: 14
+    - name: Habilitar requisitos de complejidad de contraseña
+      win_security_policy:
+        name: "PasswordComplexity"
+        option_value: true

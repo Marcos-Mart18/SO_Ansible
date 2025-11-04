@@ -1,0 +1,125 @@
+---
+- name: Permisos NTFS y Políticas locales (WS2022-ES)
+  hosts: winserver
+  gather_facts: false
+
+  collections:
+    - ansible.windows
+
+  vars:
+    # === Configurable ===
+    carpeta_objetivo: "D:\\Datos\\Privado"
+    grupo_local_destino: "Usuarios de escritorio remoto"   # cámbialo si quieres otro grupo
+    # Puedes usar SIDs para evitar problemas de idioma:
+    sid_administradores: "S-1-5-32-544"  # Administradores (builtin)
+    red_lan_permitida: "192.168.18.0/24" # para la regla de firewall RDP
+
+  tasks:
+    # ---------- PERMISOS (NTFS/ACL) ----------
+    - name: Crear carpeta objetivo (si no existe)
+      ansible.windows.win_file:
+        path: "{{ carpeta_objetivo }}"
+        state: directory
+
+    - name: Garantizar que el grupo local exista (si es personalizado)
+      ansible.windows.win_group:
+        name: "{{ grupo_local_destino }}"
+        state: present
+
+    - name: Conceder Control total a Administradores (heredable a subcarpetas/archivos)
+      ansible.windows.win_acl:
+        path: "{{ carpeta_objetivo }}"
+        user: "{{ sid_administradores }}"
+        rights: FullControl
+        type: allow
+        inherit: ContainerInherit, ObjectInherit
+        propagation: None
+        state: present
+
+    - name: Conceder Modificar a {{ grupo_local_destino }} (heredable)
+      ansible.windows.win_acl:
+        path: "{{ carpeta_objetivo }}"
+        user: "{{ grupo_local_destino }}"
+        rights: Modify
+        type: allow
+        inherit: ContainerInherit, ObjectInherit
+        propagation: None
+        state: present
+
+    # (Opcional) Si quisieras quitar una ACE concreta, usa state: absent con los mismos parámetros:
+    # - name: Quitar permisos heredados/ACE indeseados (ejemplo)
+    #   ansible.windows.win_acl:
+    #     path: "{{ carpeta_objetivo }}"
+    #     user: "Usuarios"              # o SID S-1-5-32-545
+    #     rights: ReadAndExecute
+    #     type: allow
+    #     state: absent
+
+    # ---------- DERECHOS DE USUARIO (User Rights Assignment) ----------
+    - name: Permitir inicio de sesión por Escritorio Remoto a {{ grupo_local_destino }}
+      ansible.windows.win_user_right:
+        name: SeRemoteInteractiveLogonRight
+        users:
+          - ".\\{{ grupo_local_destino }}"
+        state: present
+
+    - name: Denegar inicio de sesión por Escritorio Remoto a Invitados (opcional)
+    # Nota: el grupo integrado suele llamarse "Invitados"
+      ansible.windows.win_user_right:
+        name: SeDenyRemoteInteractiveLogonRight
+        users:
+          - ".\\Invitados"
+        state: present
+
+    # ---------- POLÍTICAS DE SEGURIDAD (Password/Lockout) ----------
+    - name: Habilitar complejidad de contraseña
+      ansible.windows.win_security_policy:
+        section: System Access
+        option: PasswordComplexity
+        value: 1
+
+    - name: Longitud mínima de contraseña = 12
+      ansible.windows.win_security_policy:
+        section: System Access
+        option: MinimumPasswordLength
+        value: 12
+
+    - name: Máximo días de vigencia de contraseña = 60
+      ansible.windows.win_security_policy:
+        section: System Access
+        option: MaximumPasswordAge
+        value: 60
+
+    - name: Intentos de bloqueo (LockoutBadCount) = 5
+      ansible.windows.win_security_policy:
+        section: System Access
+        option: LockoutBadCount
+        value: 5
+
+    - name: Reinciar contador de bloqueo a 15 min
+      ansible.windows.win_security_policy:
+        section: System Access
+        option: ResetLockoutCount
+        value: 15
+
+    - name: Duración del bloqueo = 15 min
+      ansible.windows.win_security_policy:
+        section: System Access
+        option: LockoutDuration
+        value: 15
+
+    # ---------- FIREWALL (ejemplo útil) ----------
+    - name: Permitir RDP solo desde la LAN
+      ansible.windows.win_firewall_rule:
+        name: "RDP desde LAN"
+        localport: 3389
+        action: allow
+        direction: in
+        protocol: tcp
+        remoteip: "{{ red_lan_permitida }}"
+        state: present
+        enabled: yes
+
+    # ---------- REFRESCAR POLÍTICAS ----------
+    - name: Forzar actualización de directivas locales
+      ansible.windows.win_command: gpupdate /force

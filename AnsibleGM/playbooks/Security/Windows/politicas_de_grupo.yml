@@ -1,0 +1,7 @@
+- name: Configurar políticas de grupo en Windows
+  hosts: win_clients, winserver
+  tasks:
+    - name: Configurar política de auditoría
+      win_security_policy:
+        name: "AuditLogonEvents"
+        option_value: true

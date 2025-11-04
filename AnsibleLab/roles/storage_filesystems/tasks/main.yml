@@ -1,0 +1,26 @@
+---
+# Administración del almacenamiento y sistemas de archivos
+- name: Ensure mount points exist (Linux/macOS)
+  ansible.builtin.file:
+    path: "{{ item.src | default(item.path) | default(item.mountpoint) }}"
+    state: directory
+    mode: "0755"
+  loop: "{{ mounts | default([]) }}"
+  when: ansible_os_family != 'Windows'
+
+- name: Ensure mounts are present in fstab and mounted (Linux/macOS)
+  ansible.builtin.mount:
+    path: "{{ item.mountpoint | default(item.path) }}"
+    src: "{{ item.src }}"
+    fstype: "{{ item.fstype | default('ext4') }}"
+    opts: "{{ item.opts | default('defaults') }}"
+    state: mounted
+  loop: "{{ mounts | default([]) }}"
+  when: ansible_os_family != 'Windows' and (item.src is defined)
+
+- name: Ensure directories exist on Windows
+  ansible.windows.win_file:
+    path: "{{ item.path }}"
+    state: directory
+  loop: "{{ mounts | default([]) }}"
+  when: ansible_os_family == 'Windows'

@@ -1,0 +1,6 @@
+---
+system_show_processes: false
+linux_services_enable: []
+linux_users: []
+cron_jobs: []
+mount_points: []

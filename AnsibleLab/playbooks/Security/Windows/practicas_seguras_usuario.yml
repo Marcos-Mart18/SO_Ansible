@@ -1,0 +1,7 @@
+- name: Configurar prácticas seguras de usuario en Windows
+  hosts: windows
+  tasks:
+    - name: Configurar bloqueo automático tras inactividad
+      win_security_policy:
+        name: "InteractiveLogon_RequireActiveSessionLock"
+        option_value: true

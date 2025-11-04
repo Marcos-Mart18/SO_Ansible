@@ -1,0 +1,25 @@
+---
+- name: Show top processes (CPU)
+  ansible.windows.win_shell: |
+    Get-Process |
+      Sort-Object CPU -Descending |
+      Select-Object -First 15 |
+      Format-Table -AutoSize Id,ProcessName,CPU,WS
+  register: win_top_ps
+  changed_when: false
+  when: system_show_processes | default(false)
+  tags: [system]
+
+- name: Display process list
+  ansible.builtin.debug:
+    var: win_top_ps.stdout_lines
+  when: system_show_processes | default(false)
+  tags: [system]
+
+- name: Ensure services are enabled and running
+  ansible.windows.win_service:
+    name: "{{ item }}"
+    start_mode: auto
+    state: started
+  loop: "{{ win_services_enable | default([]) }}"
+  tags: [system]

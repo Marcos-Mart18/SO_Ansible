@@ -1,0 +1,92 @@
+---
+- name: Gestión de usuarios (Windows Server 2022 - ES)
+  hosts: ws2022
+  gather_facts: false
+
+  vars:
+    ansible_user: Administrador
+    ansible_password: "mrk87dwp_"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+
+  collections:
+    - ansible.windows
+    - microsoft.ad
+
+  tasks:
+    # ======== USUARIOS LOCALES ========
+    - name: Crear/actualizar usuarios locales
+      ansible.windows.win_user:
+        name: "{{ item.name }}"
+        password: "{{ item.password | default(omit) }}"
+        fullname: "{{ item.fullname | default(omit) }}"
+        description: "{{ item.description | default(omit) }}"
+        state: "{{ item.state | default('present') }}"
+        account_disabled: "{{ item.disabled | default(false) }}"
+        password_never_expires: "{{ item.password_never_expires | default(true) }}"
+        user_cannot_change_password: "{{ item.user_cannot_change_password | default(true) }}"
+        groups: "{{ item.groups | default(omit) }}"       # nombres en español
+        groups_action: add
+        update_password: on_create
+      loop:
+        - name: operador
+          password: "Operador#2025"
+          fullname: "Operador Local"
+          description: "Cuenta gestionada por Ansible"
+          groups:
+            - "Administradores"
+            - "Usuarios de escritorio remoto"
+        - name: invitado
+          state: absent
+
+    - name: Asegurar membresía de 'Usuarios de escritorio remoto'
+      ansible.windows.win_group_membership:
+        name: "Usuarios de escritorio remoto"
+        members:
+          - ".\\operador"
+        state: present
+
+    - name: Permitir inicio de sesión por Escritorio remoto
+      ansible.windows.win_user_right:
+        name: SeRemoteInteractiveLogonRight
+        users:
+          - ".\\operador"
+        state: present
+
+    # ======== USUARIOS DE ACTIVE DIRECTORY (si ws2022 es DC) ========
+    - name: Crear/actualizar usuarios de Active Directory
+      microsoft.ad.user:
+        identity: "{{ item.identity }}"            # sAMAccountName o UPN
+        password: "{{ item.password | default(omit) }}"
+        firstname: "{{ item.firstname | default(omit) }}"
+        surname: "{{ item.surname | default(omit) }}"
+        display_name: "{{ item.display_name | default(omit) }}"
+        enabled: "{{ item.enabled | default(true) }}"
+        path: "{{ item.path | default('OU=Usuarios,DC=contoso,DC=local') }}"
+        groups:
+          set: "{{ item.groups | default(['Domain Users']) }}"
+        attributes: "{{ item.attributes | default(omit) }}"
+        state: "{{ item.state | default('present') }}"
+        # Si necesitas forzar credenciales de dominio, descomenta y ajusta:
+        # domain_server: "GAMECENTER.gamecenter.lan"
+        # domain_username: "GAMECENTER\\Administrador"
+        # domain_password: "mrk87dwp_"
+      loop:
+        - identity: "jrivera"
+          firstname: "Juan"
+          surname: "Rivera"
+          display_name: "Juan Rivera"
+          password: "Jr!vera#2025"
+          enabled: true
+          path: "OU=Usuarios,DC=contoso,DC=local"
+          groups:
+            - "Domain Users"
+            - "Remote Desktop Users"   # Ajusta al nombre localizado si aplica
+          attributes:
+            set:
+              department: "Sistemas"
+              title: "Operador"
+        - identity: "temporal"
+          state: absent
+      tags: ["ad"]

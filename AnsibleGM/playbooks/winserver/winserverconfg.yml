@@ -1,0 +1,176 @@
+- name: WS2022
+  hosts: ws2022
+  gather_facts: no
+  become: true
+
+  vars:
+    # NICs según Windows
+    lan_nic_alias: "Ethernet"          # LAN
+    wan_nic_alias: "Ethernet 2"        # WAN
+
+    # Dominio / AD
+    domain_name: "gamecenter.lan"
+    dsrm_password: "{{ ansible_password }}"   # usa la misma del inventario
+
+    # IPv4 LAN (solo referencia)
+    ipv4_lan_ip: "10.10.10.2"
+    ipv4_lan_prefix: 24
+    ipv4_lan_net: "10.10.10.0"
+    ipv4_mask: "255.255.255.0"
+    ipv4_router: "10.10.10.1"
+
+    # IPv6 LAN
+    ipv6_addr: "2025:db8:1::2"
+    ipv6_prefix: 64
+
+    # DHCPv4 scope
+    dhcpv4_scope_name: "LANv4"
+    dhcpv4_start: "10.10.10.50"
+    dhcpv4_end:   "10.10.10.70"
+    dhcpv4_lease_days: 7
+
+    # DHCPv6 scope
+    dhcpv6_scope_name: "LANv6"
+    dhcpv6_prefix: "2025:db8:1::"
+    dhcpv6_prefix_len: 64
+    dhcpv6_start: "2025:db8:1::50"
+    dhcpv6_end:   "2025:db8:1::70"
+
+    # NAT44
+    nat_name: "NAT44"
+    nat_internal_prefix: "{{ ipv4_lan_net }}/{{ ipv4_lan_prefix }}"
+
+  tasks:
+    # ---------------- AD DS + nuevo bosque ----------------
+    - name: Instalar AD DS (si no está)
+      ansible.windows.win_feature:
+        name: AD-Domain-Services
+        include_management_tools: yes
+        state: present
+
+    - name: Crear nuevo bosque de Active Directory (gamecenter.lan)
+      ansible.windows.win_domain:
+        dns_domain_name: "{{ domain_name }}"
+        safe_mode_password: "{{ dsrm_password }}"
+      register: ad_forest
+
+    - name: Reiniciar si AD lo requiere
+      ansible.windows.win_reboot:
+      when: ad_forest.reboot_required | default(false)
+
+    # ---------------- DNS Server ----------------
+    - name: Asegurar rol DNS
+      ansible.windows.win_feature:
+        name: DNS
+        include_management_tools: yes
+        state: present
+
+    - name: Configurar forwarders DNS (8.8.8.8 / 1.1.1.1)
+      ansible.windows.win_powershell:
+        script: |
+          $fw = Get-DnsServerForwarder -ErrorAction SilentlyContinue
+          if ($fw) { Remove-DnsServerForwarder -IPAddress ($fw.IPAddress) -Force -ErrorAction SilentlyContinue }
+          Add-DnsServerForwarder -IPAddress @("8.8.8.8", "1.1.1.1") -PassThru | Out-Null
+          Set-Service -Name DNS -StartupType Automatic
+          Start-Service DNS
+
+    # ---------------- DHCPv4 ----------------
+    - name: Instalar rol DHCP
+      ansible.windows.win_feature:
+        name: DHCP
+        include_management_tools: yes
+        state: present
+
+    - name: Autorizar el servidor DHCP en AD
+      ansible.windows.win_powershell:
+        script: |
+          try { Add-DhcpServerInDC -DnsName (Get-ADComputer $env:COMPUTERNAME).DNSHostName -Force } catch {}
+
+    - name: Crear/asegurar scope DHCPv4
+      ansible.windows.win_powershell:
+        script: |
+          $net  = [IPAddress]"{{ ipv4_lan_net }}"
+          $mask = "{{ ipv4_mask }}"
+          $have = Get-DhcpServerv4Scope -ErrorAction SilentlyContinue | Where-Object { $_.ScopeId -eq $net }
+          if (-not $have) {
+            Add-DhcpServerv4Scope -Name "{{ dhcpv4_scope_name }}" -StartRange "{{ dhcpv4_start }}" -EndRange "{{ dhcpv4_end }}" -SubnetMask $mask -LeaseDuration ([TimeSpan]::FromDays({{ dhcpv4_lease_days }}))
+          }
+
+    - name: Configurar opciones DHCPv4
+      ansible.windows.win_powershell:
+        script: |
+          Set-DhcpServerv4OptionValue -ScopeId "{{ ipv4_lan_net }}" -Router "{{ ipv4_router }}" -DnsServer "{{ ipv4_lan_ip }}" -DnsDomain "{{ domain_name }}" -Force
+          Set-Service -Name DHCPServer -StartupType Automatic
+          Start-Service DHCPServer
+
+    # ---------------- DHCPv6 ----------------
+    - name: Crear/asegurar scope DHCPv6
+      ansible.windows.win_powershell:
+        script: |
+          $prefix = "{{ dhcpv6_prefix }}"
+          $len    = {{ dhcpv6_prefix_len }}
+          $have6 = Get-DhcpServerv6Scope -ErrorAction SilentlyContinue | Where-Object { $_.Prefix -eq $prefix -and $_.PrefixLength -eq $len }
+          if (-not $have6) {
+            Add-DhcpServerv6Scope -Name "{{ dhcpv6_scope_name }}" -Prefix $prefix -PrefixLength $len -StartRange "{{ dhcpv6_start }}" -EndRange "{{ dhcpv6_end }}"
+          }
+          Set-DhcpServerv6OptionValue -DnsServer @("{{ ipv6_addr }}") -DomainName "{{ domain_name }}" -Force
+
+    # ---------------- NAT IPv4 (SNAT) ----------------
+    - name: Crear NAT44 para salida por WAN
+      ansible.windows.win_powershell:
+        script: |
+          $natName = "{{ nat_name }}"
+          $wanIdx  = (Get-NetAdapter -Name "{{ wan_nic_alias }}").ifIndex
+          $prefix  = "{{ nat_internal_prefix }}"
+          $existing = Get-NetNat -Name $natName -ErrorAction SilentlyContinue
+          if ($existing) { Remove-NetNat -Name $natName -Confirm:$false -ErrorAction SilentlyContinue }
+          New-NetNat -Name $natName -InternalIPInterfaceAddressPrefix $prefix -ExternalIPInterfaceIndex $wanIdx | Out-Null
+
+    # ---------------- IIS (Internet Information Services) ----------------
+    - name: Instalar rol IIS (servidor web)
+      ansible.windows.win_feature:
+        name:
+          - Web-Server
+          - Web-Common-Http
+          - Web-Default-Doc
+          - Web-Dir-Browsing
+          - Web-Http-Errors
+          - Web-Static-Content
+          - Web-Http-Redirect
+          - Web-Health
+          - Web-Http-Logging
+          - Web-Request-Monitor
+          - Web-Stat-Compression
+          - Web-Filtering
+          - Web-Mgmt-Console
+        include_management_tools: yes
+        state: present
+      tags: ["iis"]
+
+    - name: Crear web
+      ansible.windows.win_copy:
+        content: |
+          <html>
+            <head><title>Servidor Web GameCenter</title></head>
+            <body style="font-family:Segoe UI; text-align:center; margin-top:50px;">
+              <h1>¡Bienvenido al Servidor Web de GameCenter!</h1>
+              <p>Configurado automáticamente con Ansible en Windows Server 2022.</p>
+            </body>
+          </html>
+        dest: "C:\\inetpub\\wwwroot\\index.html"
+
+    # ---------------- WinRM ----------------
+    - name: Asegurar WinRM HTTP permitido
+      ansible.windows.win_powershell:
+        script: |
+          Enable-PSRemoting -Force
+          Set-Item WSMan:\localhost\Service\Auth\Basic -Value $true
+          Set-Item WSMan:\localhost\Service\AllowUnencrypted -Value $true
+          Enable-NetFirewallRule -Name WINRM-HTTP-In-TCP
+      changed_when: false
+
+    # ---------------- Verificación ----------------
+    - name: Mostrar resumen de roles instalados
+      ansible.windows.win_powershell:
+        script: |
+          Get-WindowsFeature | Where-Object {$_.InstallState -eq "Installed"} | Select-Object DisplayName

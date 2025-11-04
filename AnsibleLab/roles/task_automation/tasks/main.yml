@@ -1,0 +1,27 @@
+---
+# Automatización de tareas
+- name: Configure cron jobs (Linux/macOS)
+  ansible.builtin.cron:
+    name: "{{ item.name }}"
+    minute: "{{ item.minute | default('0') }}"
+    hour: "{{ item.hour | default('*') }}"
+    day: "{{ item.day | default('*') }}"
+    month: "{{ item.month | default('*') }}"
+    weekday: "{{ item.weekday | default('*') }}"
+    user: "{{ item.user | default('root') }}"
+    job: "{{ item.job }}"
+    state: present
+  loop: "{{ cron_jobs | default([]) }}"
+  when: ansible_os_family != 'Windows'
+
+- name: Configure scheduled tasks (Windows)
+  ansible.windows.win_scheduled_task:
+    name: "{{ item.name }}"
+    description: "{{ item.description | default(omit) }}"
+    actions: "{{ item.actions }}"
+    triggers: "{{ item.triggers }}"
+    username: "{{ item.username | default(omit) }}"
+    password: "{{ item.password | default(omit) }}"
+    state: present
+  loop: "{{ scheduled_tasks | default([]) }}"
+  when: ansible_os_family == 'Windows'

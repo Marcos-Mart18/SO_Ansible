@@ -1,0 +1,99 @@
+---
+- name: Crear usuarios y agregarlos a un grupo específico (WS2022 - ES)
+  hosts: ws2022
+  gather_facts: false
+
+  collections:
+    - ansible.windows
+    - microsoft.ad
+
+  vars:
+    # === Config LOCAL ===
+    local_group: "Usuarios de escritorio remoto"   # Cambia por el grupo local deseado (en ES)
+    local_users:
+      - name: "soporte1"
+        password: "Soporte#2025"
+        fullname: "Soporte Nivel 1"
+        description: "Cuenta gestionada por Ansible"
+      - name: "soporte2"
+        password: "Soporte#2025"
+        fullname: "Soporte Nivel 2"
+
+    # === Config AD (opcional, si ws2022 es DC) ===
+    ad_group: "Helpdesk"   # Cambia por tu grupo de dominio
+    ad_group_ou: "OU=Grupos,DC=contoso,DC=local"   # Dónde crear/buscar el grupo si no existe
+    ad_users_ou: "OU=Usuarios,DC=contoso,DC=local" # OU destino de usuarios
+    ad_users:
+      - identity: "jrivera"
+        firstname: "Juan"
+        surname: "Rivera"
+        display_name: "Juan Rivera"
+        password: "Jr!vera#2025"
+      - identity: "mperez"
+        firstname: "María"
+        surname: "Pérez"
+        display_name: "María Pérez"
+        password: "Mp3r3z#2025"
+
+  tasks:
+    # ==================== LOCAL ====================
+    - name: (LOCAL) Asegurar que el grupo local exista
+      ansible.windows.win_group:
+        name: "{{ local_group }}"
+        state: present
+      tags: [local]
+
+    - name: (LOCAL) Crear/actualizar usuarios locales
+      ansible.windows.win_user:
+        name: "{{ item.name }}"
+        password: "{{ item.password }}"
+        fullname: "{{ item.fullname | default(omit) }}"
+        description: "{{ item.description | default(omit) }}"
+        state: present
+        account_disabled: false
+        password_never_expires: true
+        user_cannot_change_password: true
+        update_password: on_create
+      loop: "{{ local_users }}"
+      tags: [local]
+
+    - name: (LOCAL) Agregar cada usuario local al grupo específico
+      ansible.windows.win_group_membership:
+        name: "{{ local_group }}"
+        members:
+          - ".\\{{ item.name }}"
+        state: present          # añade sin forzar membresía exclusiva
+      loop: "{{ local_users }}"
+      tags: [local]
+
+    # ==================== AD (OPCIONAL) ====================
+    - name: (AD) Asegurar que el grupo de dominio exista
+      microsoft.ad.group:
+        identity: "{{ ad_group }}"
+        path: "{{ ad_group_ou }}"
+        scope: global
+        category: security
+        state: present
+      tags: [ad]
+
+    - name: (AD) Crear/actualizar usuarios de dominio
+      microsoft.ad.user:
+        identity: "{{ item.identity }}"
+        password: "{{ item.password }}"
+        firstname: "{{ item.firstname }}"
+        surname: "{{ item.surname }}"
+        display_name: "{{ item.display_name }}"
+        enabled: true
+        path: "{{ ad_users_ou }}"
+        state: present
+      loop: "{{ ad_users }}"
+      tags: [ad]
+
+    - name: (AD) Agregar cada usuario de dominio al grupo específico (sin tocar otros grupos)
+      microsoft.ad.user:
+        identity: "{{ item.identity }}"
+        groups:
+          add:
+            - "{{ ad_group }}"
+      loop: "{{ ad_users }}"
+      tags: [ad]

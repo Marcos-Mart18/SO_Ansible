@@ -1,0 +1,12 @@
+---
+- name: Main site playbook
+  hosts: all
+  gather_facts: yes
+  become: true
+  roles:
+    - processes_services
+    - users_policies
+    - task_automation
+    - storage_filesystems
+ 
+ - import_playbook: debianserver.yml

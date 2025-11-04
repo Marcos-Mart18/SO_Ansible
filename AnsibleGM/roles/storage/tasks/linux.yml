@@ -1,0 +1,43 @@
+---
+- name: Create partition when requested
+  community.general.parted:
+    device: "{{ item.device }}"
+    number: "{{ item.number | default(1) }}"
+    state: present
+    fs_type: "{{ item.fs_type | default(omit) }}"
+    part_start: "{{ item.part_start | default(omit) }}"
+    part_end: "{{ item.part_end | default(omit) }}"
+  loop: "{{ mount_points | default([]) }}"
+  when: item.create_partition | default(false)
+  tags: [storage]
+
+- name: Create filesystem if defined
+  community.general.filesystem:
+    fstype: "{{ item.fs_type }}"
+    dev: "{{ item.src | default(item.device) }}"
+    force: "{{ item.fs_force | default(false) }}"
+    opts: "{{ item.fs_opts | default(omit) }}"
+    label: "{{ item.label | default(omit) }}"
+  loop: "{{ mount_points | default([]) }}"
+  when: item.fs_type is defined
+  tags: [storage]
+
+- name: Ensure mount point directory exists
+  ansible.builtin.file:
+    path: "{{ item.mount_point }}"
+    state: directory
+    mode: "0755"
+  loop: "{{ mount_points | default([]) }}"
+  when: item.mount_point is defined
+  tags: [storage]
+
+- name: Ensure mount is configured and mounted
+  ansible.posix.mount:
+    path: "{{ item.mount_point }}"
+    src: "{{ item.src | default(item.device) }}"
+    fstype: "{{ item.fs_type }}"
+    opts: "{{ item.opts | default('defaults') }}"
+    state: mounted
+  loop: "{{ mount_points | default([]) }}"
+  when: item.mount_point is defined and item.fs_type is defined
+  tags: [storage]

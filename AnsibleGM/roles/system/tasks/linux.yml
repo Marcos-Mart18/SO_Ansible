@@ -1,0 +1,25 @@
+---
+- name: Show top processes (CPU)
+  ansible.builtin.shell: "ps -eo pid,comm,%cpu,%mem --sort=-%cpu | head -n 15"
+  register: linux_top_ps
+  changed_when: false
+  when: system_show_processes | default(false)
+  tags: [system]
+
+- name: Display process list
+  ansible.builtin.debug:
+    var: linux_top_ps.stdout_lines
+  when: system_show_processes | default(false)
+  tags: [system]
+
+- name: Collect service facts
+  ansible.builtin.service_facts:
+  tags: [system]
+
+- name: Enable and start services
+  ansible.builtin.service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop: "{{ linux_services_enable | default([]) }}"
+  tags: [system]
