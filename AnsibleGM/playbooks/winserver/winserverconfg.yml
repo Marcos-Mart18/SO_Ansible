@@ -167,24 +167,27 @@
         script: |
           Set-NetIPInterface -AddressFamily IPv6 -Forwarding Enabled
 
+    # (REEMPLAZA) Obtener ifIndex de la NIC LAN
     - name: Obtener ifIndex de la NIC LAN
-      ansible.windows.win_powershell:
-        script: |
-          (Get-NetIPInterface -AddressFamily IPv6 -InterfaceAlias "{{ lan_nic_alias }}").ifIndex
+      ansible.windows.win_shell: |
+        (Get-NetIPInterface -AddressFamily IPv6 -InterfaceAlias "{{ lan_nic_alias }}").ifIndex
       register: lan_ifindex
+      changed_when: false
 
+    # (REEMPLAZA) Habilitar RA en LAN y publicar prefijo + default route (opcional)
     - name: Habilitar RA en LAN y publicar prefijo + default route (opcional)
       ansible.windows.win_powershell:
         script: |
-          $ifIndex = [int]"{{ lan_ifindex.stdout }}"
+          $ifIndex = [int]"{{ lan_ifindex.stdout | trim }}"
           $prefix  = "{{ dhcpv6_prefix }}/{{ dhcpv6_prefix_len }}"
           # Habilitar anuncios en la interfaz
           netsh interface ipv6 set interface $ifIndex advertise=enabled | Out-Null
-          # Publicar prefijo on-link (SLAAC disponible); si no quieres SLAAC, ajusta lifetimes muy bajos o gestiona via router dedicado
+          # Publicar prefijo en RA
           netsh interface ipv6 add route $prefix $ifIndex publish=yes validlifetime=3600 preferredlifetime=1800 store=active | Out-Null
-          # (Opcional) Anunciar ruta por defecto si este server hará de gateway
+          # (Opcional) anunciar default route si este server será gateway
           netsh interface ipv6 add route ::/0 $ifIndex publish=yes store=active | Out-Null
           netsh interface ipv6 set interface $ifIndex advertisedefaultroute=enabled | Out-Null
+
 
     # ---------------- NAT IPv4 (SNAT) ----------------
     - name: Crear NAT44 para salida por WAN
