@@ -3,44 +3,31 @@
   gather_facts: no
 
   vars:
-    # NICs según Windows
-    lan_nic_alias: "Ethernet"          # LAN
-    wan_nic_alias: "Ethernet 2"        # WAN
-
-    # Dominio / AD
+    lan_nic_alias: "Ethernet"            # LAN
+    wan_nic_alias: "Ethernet 2"          # WAN
     domain_name: "gamecenter.lan"
     dsrm_password: "{{ ansible_password }}"
-
-    # IPv4 LAN (referencia)
     ipv4_lan_ip: "10.10.10.2"
     ipv4_lan_prefix: 24
     ipv4_lan_net: "10.10.10.0"
     ipv4_mask: "255.255.255.0"
     ipv4_router: "10.10.10.1"
-
-    # IPv6 LAN (server)
-    ipv6_addr: "2025:db8:1::2"
+    ipv6_addr: "2025:db8:1::2"           # solo referencia; ya está configurada
     ipv6_prefix: 64
-
-    # DHCPv4 scope
     dhcpv4_scope_name: "LANv4"
     dhcpv4_start: "10.10.10.50"
     dhcpv4_end:   "10.10.10.70"
     dhcpv4_lease_days: 7
-
-    # DHCPv6 scope
     dhcpv6_scope_name: "LANv6"
     dhcpv6_prefix: "2025:db8:1::"
     dhcpv6_prefix_len: 64
     dhcpv6_start: "2025:db8:1::50"
     dhcpv6_end:   "2025:db8:1::70"
-
-    # NAT44
     nat_name: "NAT44"
     nat_internal_prefix: "{{ ipv4_lan_net }}/{{ ipv4_lan_prefix }}"
 
   tasks:
-    # ---------------- AD DS + nuevo bosque ----------------
+    # --- AD DS ---
     - name: Instalar AD DS (si no está)
       ansible.windows.win_feature:
         name: AD-Domain-Services
@@ -57,23 +44,23 @@
       ansible.windows.win_reboot:
       when: ad_forest.reboot_required | default(false)
 
-    # ---------------- DNS Server ----------------
+    # --- DNS ---
     - name: Asegurar rol DNS
       ansible.windows.win_feature:
         name: DNS
         include_management_tools: yes
         state: present
 
-    - name: Configurar forwarders DNS (8.8.8.8 / 1.1.1.1)
+    - name: Configurar forwarders DNS
       ansible.windows.win_powershell:
         script: |
           $fw = Get-DnsServerForwarder -ErrorAction SilentlyContinue
           if ($fw) { Remove-DnsServerForwarder -IPAddress ($fw.IPAddress) -Force -ErrorAction SilentlyContinue }
-          Add-DnsServerForwarder -IPAddress @("8.8.8.8", "1.1.1.1") -PassThru | Out-Null
+          Add-DnsServerForwarder -IPAddress @("8.8.8.8","1.1.1.1") -PassThru | Out-Null
           Set-Service -Name DNS -StartupType Automatic
           Start-Service DNS
 
-    # ---------------- DHCP (rol y DHCPv4) ----------------
+    # --- DHCP + DHCPv4 ---
     - name: Instalar rol DHCP
       ansible.windows.win_feature:
         name: DHCP
@@ -85,7 +72,7 @@
         script: |
           try { Add-DhcpServerInDC -DnsName (Get-ADComputer $env:COMPUTERNAME).DNSHostName -Force } catch {}
 
-    - name: Crear/asegurar scope DHCPv4
+    - name: Crear/asegurar scope DHCPv4 + opciones
       ansible.windows.win_powershell:
         script: |
           $net  = [IPAddress]"{{ ipv4_lan_net }}"
@@ -98,26 +85,13 @@
           Set-Service -Name DHCPServer -StartupType Automatic
           Start-Service DHCPServer
 
-    # ---------------- DHCPv6: configuración completa ----------------
-    # 1) IPv6 fija en LAN + DNS v6 apuntando al server
-    - name: Configurar IPv6 estática en LAN
-      ansible.windows.win_powershell:
-        script: |
-          $if = "{{ lan_nic_alias }}"
-          $ip = "{{ ipv6_addr }}"
-          $plen = {{ ipv6_prefix }}
-          $cur = Get-NetIPAddress -InterfaceAlias $if -AddressFamily IPv6 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -eq $ip }
-          if (-not $cur) {
-            New-NetIPAddress -InterfaceAlias $if -IPAddress $ip -PrefixLength $plen -AddressFamily IPv6 -Type Unicast -SkipAsSource $false | Out-Null
-          }
-
+    # --- DHCPv6 completo (sin tocar IPv6 estática) ---
     - name: Poner DNS v6 en la LAN (el propio server)
       ansible.windows.win_powershell:
         script: |
           Set-DnsClientServerAddress -InterfaceAlias "{{ lan_nic_alias }}" -ServerAddresses @("{{ ipv6_addr }}")
 
-    # 2) Binding DHCPv6 correcto (LAN true, WAN false)
-    - name: Asegurar binding DHCPv6 en LAN y deshabilitar en WAN
+    - name: Asegurar binding DHCPv6 (LAN on, WAN off)
       ansible.windows.win_powershell:
         script: |
           $lan = "{{ lan_nic_alias }}"
@@ -129,8 +103,7 @@
           $wanB = $b | Where-Object { $_.InterfaceAlias -eq $wan }
           if ($wanB -and $wanB.BindingState) { Set-DhcpServerv6Binding -InterfaceAlias $wan -BindingState $false }
 
-    # 3) Scope v6 crear/activar + opciones
-    - name: Crear/asegurar scope DHCPv6 y activarlo
+    - name: Crear/activar scope DHCPv6 + opciones
       ansible.windows.win_powershell:
         script: |
           $name = "{{ dhcpv6_scope_name }}"
@@ -145,15 +118,14 @@
           Set-DhcpServerv6Scope -Prefix $prefix -PrefixLength $len -State Active
           Set-DhcpServerv6OptionValue -DnsServer @("{{ ipv6_addr }}") -DomainName "{{ domain_name }}" -Force
 
-    # 4) Firewall v6 e ICMPv6 básico
-    - name: Habilitar reglas de firewall DHCP/DHCPv6 e ICMPv6
+    - name: Habilitar firewall DHCPv6 e ICMPv6 básico
       ansible.windows.win_powershell:
         script: |
-          Enable-NetFirewallRule -DisplayGroup "DHCP Server" -ErrorAction SilentlyContinue
           Enable-NetFirewallRule -DisplayGroup "DHCPv6" -ErrorAction SilentlyContinue
           Enable-NetFirewallRule -DisplayGroup "File and Printer Sharing" -ErrorAction SilentlyContinue
+          Enable-NetFirewallRule -DisplayGroup "Core Networking" -ErrorAction SilentlyContinue
 
-    # ---------------- RA/IPv6 (sin router: que el server emita RA) ----------------
+    # --- RA/IPv6 (sin router: emitir RA desde el server) ---
     - name: Instalar Remote Access / Routing (RRAS)
       ansible.windows.win_feature:
         name:
@@ -167,29 +139,29 @@
         script: |
           Set-NetIPInterface -AddressFamily IPv6 -Forwarding Enabled
 
-    # (REEMPLAZA) Obtener ifIndex de la NIC LAN
     - name: Obtener ifIndex de la NIC LAN
       ansible.windows.win_shell: |
         (Get-NetIPInterface -AddressFamily IPv6 -InterfaceAlias "{{ lan_nic_alias }}").ifIndex
       register: lan_ifindex
       changed_when: false
 
-    # (REEMPLAZA) Habilitar RA en LAN y publicar prefijo + default route (opcional)
     - name: Habilitar RA en LAN y publicar prefijo + default route (opcional)
       ansible.windows.win_powershell:
         script: |
           $ifIndex = [int]"{{ lan_ifindex.stdout | trim }}"
           $prefix  = "{{ dhcpv6_prefix }}/{{ dhcpv6_prefix_len }}"
-          # Habilitar anuncios en la interfaz
           netsh interface ipv6 set interface $ifIndex advertise=enabled | Out-Null
-          # Publicar prefijo en RA
           netsh interface ipv6 add route $prefix $ifIndex publish=yes validlifetime=3600 preferredlifetime=1800 store=active | Out-Null
           # (Opcional) anunciar default route si este server será gateway
           netsh interface ipv6 add route ::/0 $ifIndex publish=yes store=active | Out-Null
           netsh interface ipv6 set interface $ifIndex advertisedefaultroute=enabled | Out-Null
 
+    - name: Deshabilitar advertising en WAN
+      ansible.windows.win_powershell:
+        script: |
+          netsh interface ipv6 set interface "{{ wan_nic_alias }}" advertise=disabled | Out-Null
 
-    # ---------------- NAT IPv4 (SNAT) ----------------
+    # --- NAT IPv4 (SNAT) ---
     - name: Crear NAT44 para salida por WAN
       ansible.windows.win_powershell:
         script: |
@@ -200,7 +172,7 @@
           if ($existing) { Remove-NetNat -Name $natName -Confirm:$false -ErrorAction SilentlyContinue }
           New-NetNat -Name $natName -InternalIPInterfaceAddressPrefix $prefix -ExternalIPInterfaceIndex $wanIdx | Out-Null
 
-    # ---------------- IIS (opcional) ----------------
+    # --- IIS (opcional) ---
     - name: Instalar IIS
       ansible.windows.win_feature:
         name:
@@ -230,7 +202,7 @@
           </body></html>
         dest: "C:\\inetpub\\wwwroot\\index.html"
 
-    # ---------------- WinRM ----------------
+    # --- WinRM ---
     - name: Asegurar WinRM HTTP permitido
       ansible.windows.win_powershell:
         script: |
@@ -240,7 +212,7 @@
           Enable-NetFirewallRule -Name WINRM-HTTP-In-TCP
       changed_when: false
 
-    # ---------------- Verificación ----------------
+    # --- Verificación ---
     - name: Resumen DHCPv6 / RA
       ansible.windows.win_powershell:
         script: |
