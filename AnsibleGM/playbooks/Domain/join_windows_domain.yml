@@ -1,21 +1,25 @@
 - hosts: win_clients
   gather_facts: no
+  collections:
+    - ansible.windows
+
   vars:
     domain_name: "gamecenter.lan"
-    domain_admin_user: "GAMECENTER\\Administrador"
+    domain_admin_user: "GAMECENTER\\Administrador"   # también vale Administrador@gamecenter.lan
     domain_admin_pass: "mrk87dwp_"
     dc_dns_v6: "2025:db8:1::2"
     dc_dns_v4: "10.10.1.2"
     nic_alias: "Ethernet"   # cambia si tu interfaz se llama distinto
+
   tasks:
     - name: Apuntar DNS del cliente al DC (v6 y v4)
-      ansible.windows.win_powershell:
-        script: |
-          $if = "{{ nic_alias }}"
-          Set-DnsClientServerAddress -InterfaceAlias $if -ServerAddresses @("{{ dc_dns_v6 }}","{{ dc_dns_v4 }}")
+      ansible.windows.win_dns_client:
+        adapter_names: "{{ nic_alias }}"
+        ipv6_addresses: ["{{ dc_dns_v6 }}"]
+        ipv4_addresses: ["{{ dc_dns_v4 }}"]
 
     - name: Unir al dominio
-      community.windows.win_domain_membership:
+      ansible.windows.win_domain_membership:
         dns_domain_name: "{{ domain_name }}"
         domain_admin_user: "{{ domain_admin_user }}"
         domain_admin_password: "{{ domain_admin_pass }}"
@@ -24,4 +28,4 @@
 
     - name: Reiniciar si es necesario
       ansible.windows.win_reboot:
-      when: join_out.reboot_required
+      when: join_out.reboot_required | default(false)
