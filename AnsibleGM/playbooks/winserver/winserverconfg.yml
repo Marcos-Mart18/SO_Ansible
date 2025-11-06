@@ -1,7 +1,6 @@
 - name: WS2022
   hosts: ws2022
   gather_facts: no
-  become: true
 
   vars:
     # NICs según Windows
@@ -10,16 +9,16 @@
 
     # Dominio / AD
     domain_name: "gamecenter.lan"
-    dsrm_password: "{{ ansible_password }}"   # usa la misma del inventario
+    dsrm_password: "{{ ansible_password }}"
 
-    # IPv4 LAN (solo referencia)
+    # IPv4 LAN (referencia)
     ipv4_lan_ip: "10.10.10.2"
     ipv4_lan_prefix: 24
     ipv4_lan_net: "10.10.10.0"
     ipv4_mask: "255.255.255.0"
     ipv4_router: "10.10.10.1"
 
-    # IPv6 LAN
+    # IPv6 LAN (server)
     ipv6_addr: "2025:db8:1::2"
     ipv6_prefix: 64
 
@@ -48,7 +47,7 @@
         include_management_tools: yes
         state: present
 
-    - name: Crear nuevo bosque de Active Directory (gamecenter.lan)
+    - name: Crear nuevo bosque de Active Directory
       ansible.windows.win_domain:
         dns_domain_name: "{{ domain_name }}"
         safe_mode_password: "{{ dsrm_password }}"
@@ -74,7 +73,7 @@
           Set-Service -Name DNS -StartupType Automatic
           Start-Service DNS
 
-    # ---------------- DHCPv4 ----------------
+    # ---------------- DHCP (rol y DHCPv4) ----------------
     - name: Instalar rol DHCP
       ansible.windows.win_feature:
         name: DHCP
@@ -95,25 +94,64 @@
           if (-not $have) {
             Add-DhcpServerv4Scope -Name "{{ dhcpv4_scope_name }}" -StartRange "{{ dhcpv4_start }}" -EndRange "{{ dhcpv4_end }}" -SubnetMask $mask -LeaseDuration ([TimeSpan]::FromDays({{ dhcpv4_lease_days }}))
           }
-
-    - name: Configurar opciones DHCPv4
-      ansible.windows.win_powershell:
-        script: |
           Set-DhcpServerv4OptionValue -ScopeId "{{ ipv4_lan_net }}" -Router "{{ ipv4_router }}" -DnsServer "{{ ipv4_lan_ip }}" -DnsDomain "{{ domain_name }}" -Force
           Set-Service -Name DHCPServer -StartupType Automatic
           Start-Service DHCPServer
 
-    # ---------------- DHCPv6 ----------------
-    - name: Crear/asegurar scope DHCPv6
+    # ---------------- DHCPv6: configuración completa ----------------
+    # 1) IPv6 fija en LAN + DNS v6 apuntando al server
+    - name: Configurar IPv6 estática en LAN
       ansible.windows.win_powershell:
         script: |
-          $prefix = "{{ dhcpv6_prefix }}"
-          $len    = {{ dhcpv6_prefix_len }}
-          $have6 = Get-DhcpServerv6Scope -ErrorAction SilentlyContinue | Where-Object { $_.Prefix -eq $prefix -and $_.PrefixLength -eq $len }
-          if (-not $have6) {
-            Add-DhcpServerv6Scope -Name "{{ dhcpv6_scope_name }}" -Prefix $prefix -PrefixLength $len -StartRange "{{ dhcpv6_start }}" -EndRange "{{ dhcpv6_end }}"
+          $if = "{{ lan_nic_alias }}"
+          $ip = "{{ ipv6_addr }}"
+          $plen = {{ ipv6_prefix }}
+          $cur = Get-NetIPAddress -InterfaceAlias $if -AddressFamily IPv6 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -eq $ip }
+          if (-not $cur) {
+            New-NetIPAddress -InterfaceAlias $if -IPAddress $ip -PrefixLength $plen -AddressFamily IPv6 -Type Unicast -SkipAsSource $false | Out-Null
           }
+
+    - name: Poner DNS v6 en la LAN (el propio server)
+      ansible.windows.win_powershell:
+        script: |
+          Set-DnsClientServerAddress -InterfaceAlias "{{ lan_nic_alias }}" -ServerAddresses @("{{ ipv6_addr }}")
+
+    # 2) Binding DHCPv6 correcto (LAN true, WAN false)
+    - name: Asegurar binding DHCPv6 en LAN y deshabilitar en WAN
+      ansible.windows.win_powershell:
+        script: |
+          $lan = "{{ lan_nic_alias }}"
+          $wan = "{{ wan_nic_alias }}"
+          $b = Get-DhcpServerv6Binding -ErrorAction SilentlyContinue
+          if (-not $b) { return }
+          $lanB = $b | Where-Object { $_.InterfaceAlias -eq $lan }
+          if ($lanB -and -not $lanB.BindingState) { Set-DhcpServerv6Binding -InterfaceAlias $lan -BindingState $true }
+          $wanB = $b | Where-Object { $_.InterfaceAlias -eq $wan }
+          if ($wanB -and $wanB.BindingState) { Set-DhcpServerv6Binding -InterfaceAlias $wan -BindingState $false }
+
+    # 3) Scope v6 crear/activar + opciones
+    - name: Crear/asegurar scope DHCPv6 y activarlo
+      ansible.windows.win_powershell:
+        script: |
+          $name = "{{ dhcpv6_scope_name }}"
+          $prefix = "{{ dhcpv6_prefix }}"
+          $len = {{ dhcpv6_prefix_len }}
+          $start = "{{ dhcpv6_start }}"
+          $end = "{{ dhcpv6_end }}"
+          $scope = Get-DhcpServerv6Scope -ErrorAction SilentlyContinue | Where-Object { $_.Prefix -eq $prefix -and $_.PrefixLength -eq $len }
+          if (-not $scope) {
+            Add-DhcpServerv6Scope -Name $name -Prefix $prefix -PrefixLength $len -StartRange $start -EndRange $end | Out-Null
+          }
+          Set-DhcpServerv6Scope -Prefix $prefix -PrefixLength $len -State Active
           Set-DhcpServerv6OptionValue -DnsServer @("{{ ipv6_addr }}") -DomainName "{{ domain_name }}" -Force
+
+    # 4) Firewall v6 e ICMPv6 básico
+    - name: Habilitar reglas de firewall DHCP/DHCPv6 e ICMPv6
+      ansible.windows.win_powershell:
+        script: |
+          Enable-NetFirewallRule -DisplayGroup "DHCP Server" -ErrorAction SilentlyContinue
+          Enable-NetFirewallRule -DisplayGroup "DHCPv6" -ErrorAction SilentlyContinue
+          Enable-NetFirewallRule -DisplayGroup "File and Printer Sharing" -ErrorAction SilentlyContinue
 
     # ---------------- NAT IPv4 (SNAT) ----------------
     - name: Crear NAT44 para salida por WAN
@@ -126,8 +164,8 @@
           if ($existing) { Remove-NetNat -Name $natName -Confirm:$false -ErrorAction SilentlyContinue }
           New-NetNat -Name $natName -InternalIPInterfaceAddressPrefix $prefix -ExternalIPInterfaceIndex $wanIdx | Out-Null
 
-    # ---------------- IIS (Internet Information Services) ----------------
-    - name: Instalar rol IIS (servidor web)
+    # ---------------- IIS (opcional) ----------------
+    - name: Instalar IIS
       ansible.windows.win_feature:
         name:
           - Web-Server
@@ -145,18 +183,15 @@
           - Web-Mgmt-Console
         include_management_tools: yes
         state: present
-      tags: ["iis"]
 
     - name: Crear web
       ansible.windows.win_copy:
         content: |
-          <html>
-            <head><title>Servidor Web GameCenter</title></head>
-            <body style="font-family:Segoe UI; text-align:center; margin-top:50px;">
-              <h1>¡Bienvenido al Servidor Web de GameCenter!</h1>
-              <p>Configurado automáticamente con Ansible en Windows Server 2022.</p>
-            </body>
-          </html>
+          <html><head><title>Servidor Web GameCenter</title></head>
+          <body style="font-family:Segoe UI; text-align:center; margin-top:50px;">
+          <h1>¡Bienvenido al Servidor Web de GameCenter!</h1>
+          <p>Configurado automáticamente con Ansible en Windows Server 2022.</p>
+          </body></html>
         dest: "C:\\inetpub\\wwwroot\\index.html"
 
     # ---------------- WinRM ----------------
@@ -170,7 +205,12 @@
       changed_when: false
 
     # ---------------- Verificación ----------------
-    - name: Mostrar resumen de roles instalados
+    - name: Resumen DHCPv6
       ansible.windows.win_powershell:
         script: |
-          Get-WindowsFeature | Where-Object {$_.InstallState -eq "Installed"} | Select-Object DisplayName
+          Write-Host "== BINDINGS =="
+          Get-DhcpServerv6Binding | ft -AutoSize
+          Write-Host "== SCOPE =="
+          Get-DhcpServerv6Scope | ft Name,Prefix,PrefixLength,State,StartRange,EndRange -AutoSize
+          Write-Host "== OPCIONES =="
+          Get-DhcpServerv6OptionValue

@@ -5,7 +5,7 @@
     - community.vmware
 
   vars:
-    esxi_host: "172.17.25.20"
+    esxi_host: "168.121.48.254:10120"
     esxi_user: "root"
     esxi_pass: "qwe123$"
     esxi_hostname_fqdn: "localhost.lim.upeu.edu.pe"
@@ -20,18 +20,18 @@
 
     # Definición de VMs a crear
     vms:
-      - name: "Bazzite_pc02"
-        guest_id: "ubuntu64Guest"
+      - name: "Bazzite_pc02_G01"
+        guest_id: "fedora64Guest"
         memory_mb: 8192
         num_cpus: 4
         disk_gb: 60
         iso_file: "bazzite-stable-amd64.iso"
         networks:
-          - name: "{{ pg_main }}"
+          - name: "{{ pg_extra }}"
             start_connected: true
             device_type: vmxnet3
 
-      - name: "Windows11pro_pc01"
+      - name: "Windows11pro_pc01_G01"
         guest_id: "windows11_64Guest"
         memory_mb: 8192
         num_cpus: 4

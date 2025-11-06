@@ -11,14 +11,11 @@
     datacenter_name: "ha-datacenter"
     ds_name: "datastore1"
 
-    # Carpeta base en el datastore donde quedarán los backups
     ds_folder_base: "MartinezG01VI/backups"
 
-    # === DÓNDE están los backups en tu laptop ===
-    # Usa rutas reales. En Windows puedes usar: C:/Backups/VMs/Bazzite_pc01
     local_vm_backups:
       - name: "Bazzite_pc01"
-        local_dir: "/ruta/local/Bazzite_pc01"   # contiene .ovf + .vmdk + (opcional .mf)
+        local_dir: "/ruta/local/Bazzite_pc01"
       - name: "Windows11pro_pc01"
         local_dir: "/ruta/local/Windows11pro_pc01"
       - name: "WindowsSERVER2022_G01"

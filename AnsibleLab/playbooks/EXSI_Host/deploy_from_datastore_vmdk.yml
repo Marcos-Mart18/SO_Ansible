@@ -4,7 +4,7 @@
 
   vars:
     # === Conexión ESXi ===
-    esxi_host: "168.121.48.254:10120"
+    esxi_host: "168.121.48.254:10119"
     esxi_user: "{{ esxi_user | default('root') }}"
     esxi_pass: "{{ esxi_pass }}"
     validate_certs: false

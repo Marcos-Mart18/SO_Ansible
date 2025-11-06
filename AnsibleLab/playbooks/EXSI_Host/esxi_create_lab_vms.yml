@@ -5,22 +5,19 @@
     - community.vmware
 
   vars:
-    esxi_host: "168.121.48.254:10119"
+    esxi_host: "172.17.25.19"
     esxi_user: "root"
     esxi_pass: "qwe123$"
     esxi_hostname_fqdn: "localhost.lim.upeu.edu.pe"
     ds_name: "datastore1"
 
-    # Carpeta dentro del datastore donde están las ISOs
     iso_folder: "RiveraG01VI"
 
-    # Portgroups
     pg_main: "vSW_G01"
-    pg_extra: "VM Network"   # solo para Windows Server (segunda NIC)
+    pg_extra: "VM Network"
 
-    # Definición de VMs a crear
     vms:
-      - name: "Ubuntu_pc01"
+      - name: "ubuntuG01"
         guest_id: "ubuntu64Guest"
         memory_mb: 8192
         num_cpus: 4
@@ -31,7 +28,7 @@
             start_connected: true
             device_type: vmxnet3
     
-      - name: "Server_Debian"
+      - name: "server-debian"
         guest_id: "debian8_64Guest"
         memory_mb: 8192
         num_cpus: 4
@@ -42,7 +39,7 @@
             start_connected: true
             device_type: vmxnet3
 
-      - name: "Windows11pro_pc03"
+      - name: "win11G01"
         guest_id: "windows11_64Guest"
         memory_mb: 8192
         num_cpus: 4
@@ -113,7 +110,6 @@
       loop_control:
         label: "{{ item.name }}"
 
-    # ✅ Bloque corregido con "include_tasks" para evitar error de loop
     - name: Montar ISO (IDE 0:0) con fallback a SATA 0:0
       include_tasks: mount_iso_block.yml
       loop: "{{ vms }}"

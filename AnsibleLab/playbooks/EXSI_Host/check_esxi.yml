@@ -6,7 +6,7 @@
     - community.vmware
 
   vars:
-    esxi_host: "172.17.25.20"
+    esxi_host: "168.121.48.254:10119"
     esxi_user: "root"
     esxi_pass: "qwe123$"
 
