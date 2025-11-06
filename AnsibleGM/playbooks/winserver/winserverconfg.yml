@@ -153,6 +153,39 @@
           Enable-NetFirewallRule -DisplayGroup "DHCPv6" -ErrorAction SilentlyContinue
           Enable-NetFirewallRule -DisplayGroup "File and Printer Sharing" -ErrorAction SilentlyContinue
 
+    # ---------------- RA/IPv6 (sin router: que el server emita RA) ----------------
+    - name: Instalar Remote Access / Routing (RRAS)
+      ansible.windows.win_feature:
+        name:
+          - RemoteAccess
+          - Routing
+        include_management_tools: yes
+        state: present
+
+    - name: Habilitar reenvío IPv6 (router mode)
+      ansible.windows.win_powershell:
+        script: |
+          Set-NetIPInterface -AddressFamily IPv6 -Forwarding Enabled
+
+    - name: Obtener ifIndex de la NIC LAN
+      ansible.windows.win_powershell:
+        script: |
+          (Get-NetIPInterface -AddressFamily IPv6 -InterfaceAlias "{{ lan_nic_alias }}").ifIndex
+      register: lan_ifindex
+
+    - name: Habilitar RA en LAN y publicar prefijo + default route (opcional)
+      ansible.windows.win_powershell:
+        script: |
+          $ifIndex = [int]"{{ lan_ifindex.stdout }}"
+          $prefix  = "{{ dhcpv6_prefix }}/{{ dhcpv6_prefix_len }}"
+          # Habilitar anuncios en la interfaz
+          netsh interface ipv6 set interface $ifIndex advertise=enabled | Out-Null
+          # Publicar prefijo on-link (SLAAC disponible); si no quieres SLAAC, ajusta lifetimes muy bajos o gestiona via router dedicado
+          netsh interface ipv6 add route $prefix $ifIndex publish=yes validlifetime=3600 preferredlifetime=1800 store=active | Out-Null
+          # (Opcional) Anunciar ruta por defecto si este server hará de gateway
+          netsh interface ipv6 add route ::/0 $ifIndex publish=yes store=active | Out-Null
+          netsh interface ipv6 set interface $ifIndex advertisedefaultroute=enabled | Out-Null
+
     # ---------------- NAT IPv4 (SNAT) ----------------
     - name: Crear NAT44 para salida por WAN
       ansible.windows.win_powershell:
@@ -205,12 +238,10 @@
       changed_when: false
 
     # ---------------- Verificación ----------------
-    - name: Resumen DHCPv6
+    - name: Resumen DHCPv6 / RA
       ansible.windows.win_powershell:
         script: |
-          Write-Host "== BINDINGS =="
-          Get-DhcpServerv6Binding | ft -AutoSize
-          Write-Host "== SCOPE =="
-          Get-DhcpServerv6Scope | ft Name,Prefix,PrefixLength,State,StartRange,EndRange -AutoSize
-          Write-Host "== OPCIONES =="
-          Get-DhcpServerv6OptionValue
+          Write-Host "== BINDINGS DHCPv6 =="; Get-DhcpServerv6Binding | ft -AutoSize
+          Write-Host "== SCOPE DHCPv6 =="; Get-DhcpServerv6Scope | ft Name,Prefix,PrefixLength,State,StartRange,EndRange -AutoSize
+          Write-Host "== OPCIONES DHCPv6 =="; Get-DhcpServerv6OptionValue
+          Write-Host "== IF IPv6 (Forwarding) =="; Get-NetIPInterface -AddressFamily IPv6 | ft ifIndex,InterfaceAlias,Forwarding -AutoSize
