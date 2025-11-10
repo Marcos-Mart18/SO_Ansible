@@ -3,8 +3,8 @@
   gather_facts: no
 
   vars:
-    lan_nic_alias: "Ethernet"            # LAN
-    wan_nic_alias: "Ethernet 2"          # WAN
+    lan_nic_alias: "LAN"            # LAN
+    wan_nic_alias: "WAN"          # WAN
     domain_name: "gamecenter.lan"
     dsrm_password: "{{ ansible_password }}"
     ipv4_lan_ip: "10.10.10.2"

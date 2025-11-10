@@ -43,6 +43,22 @@
             start_connected: true
             device_type: vmxnet3
 
+      - name: "WindowsServer_G01"
+        guest_id: "windows2016_64Guest"  # O usa la versión adecuada, como windows2019_64Guest o windows2022_64Guest
+        memory_mb: 8192  # Ajusta según los requisitos del servidor
+        num_cpus: 4  # Ajusta según los requisitos del servidor
+        disk_gb: 50  # Ajusta el tamaño del disco según sea necesario
+        iso_file: "WindowsServer2022_64bit.iso"  # Asegúrate de que la ISO de Windows Server esté en el datastore
+        firmware: "efi"  # Utiliza "efi" si el servidor requiere UEFI, o "bios" si utiliza BIOS tradicional
+        networks:
+          - name: "{{ pg_main }}"  # Primer adaptador, conectado a pg_main
+            start_connected: true
+            device_type: vmxnet3  # El adaptador vmxnet3 es el recomendado para máquinas virtuales
+          - name: "{{ pg_extra }}"  # Segundo adaptador, conectado a pg_extra
+            start_connected: true
+            device_type: vmxnet3  # Utilizando el mismo tipo de adaptador para la segunda red
+
+
   tasks:
 
     - name: Crear/asegurar VMs (hardware + disco)
