@@ -19,11 +19,20 @@
     ansible_python_interpreter: "/usr/bin/python3"
 
   tasks:
-    - name: Instalar paquetes de dominio con rpm-ostree
-      ansible.builtin.shell:
-        cmd: |
-          rpm-ostree install {{ item }}
+    - name: Verificar si cada paquete está instalado
+      ansible.builtin.command:
+        cmd: rpm-ostree status | grep "{{ item }}"
+      register: package_status
+      failed_when: false
       loop: "{{ pkgs }}"
+      loop_control:
+        loop_var: item
+
+    - name: Instalar paquetes no instalados
+      ansible.builtin.shell:
+        cmd: rpm-ostree install {{ item }}
+      loop: "{{ pkgs }}"
+      when: "'{{ item }}' not in package_status.stdout"
       become: true
 
     - name: Apuntar resolv.conf al DC (temporal y simple)
