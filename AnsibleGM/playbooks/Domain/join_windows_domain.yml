@@ -1,4 +1,4 @@
-- hosts: win_clients
+- hosts: win11esxi
   gather_facts: no
   collections:
     - ansible.windows
@@ -8,8 +8,8 @@
     domain_admin_user: "GAMECENTER\\Administrador"   # también vale Administrador@gamecenter.lan
     domain_admin_pass: "mrk87dwp_"
     dc_dns_v6: "2025:db8:1::2"
-    dc_dns_v4: "10.10.1.2"
-    nic_alias: "Ethernet"   # cambia si tu interfaz se llama distinto
+    dc_dns_v4: "10.10.10.2"
+    nic_alias: "Ethernet0"   # cambia si tu interfaz se llama distinto
 
   tasks:
     - name: Apuntar DNS del cliente al DC (v6 y v4)

@@ -1,10 +1,10 @@
-- hosts: linux_clients
+- hosts: bazziteesxi
   become: true
   gather_facts: yes
   vars:
     domain_name: "gamecenter.lan"
     dc_dns_v6: "2025:db8:1::2"
-    dc_dns_v4: "10.10.1.2"
+    dc_dns_v4: "10.10.10.2"
     # el paquete puede variar levemente según derivado, esto funciona en Fedora/Bazzite
     pkgs:
       - realmd
