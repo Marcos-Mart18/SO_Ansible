@@ -11,7 +11,7 @@
     ipv4_lan_prefix: 24
     ipv4_lan_net: "10.10.10.0"
     ipv4_mask: "255.255.255.0"
-    ipv4_router: "10.10.10.1"
+    ipv4_router: "10.10.10.2"
     ipv6_addr: "2025:db8:1::2"           # solo referencia; ya está configurada
     ipv6_prefix: 64
     dhcpv4_scope_name: "LANv4"
@@ -35,7 +35,7 @@
         state: present
 
     - name: Crear nuevo bosque de Active Directory
-      ansible.windows.win_domain:
+      microsoft.ad.domain:
         dns_domain_name: "{{ domain_name }}"
         safe_mode_password: "{{ dsrm_password }}"
       register: ad_forest

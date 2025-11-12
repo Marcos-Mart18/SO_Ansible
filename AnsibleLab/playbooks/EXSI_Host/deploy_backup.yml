@@ -15,16 +15,16 @@
 
     # === VMs a desplegar desde tu PC (OVF/OVA locales) ===
     vm_defs:
-      - name: "Server-Debian"
-        ovf: "/mnt/d/Backup/LABACAD/server-debian/server-debian.ovf"   # o .ova
-        networks:
-          "vSW_G01": "vSW_G01"        # NIC 1 del OVF  -> portgroup en ESXi
-          "VM Network": "VM Network"  # NIC 2 del OVF  -> portgroup en ESXi
-        disk_provisioning: thin
-        power_on: true
+      # - name: "Server-Debian"
+      #   ovf: "/mnt/d/Backup/LABACAD/server-debian/server-debian.ovf"   # o .ova
+      #   networks:
+      #     "vSW_G01": "vSW_G01"        # NIC 1 del OVF  -> portgroup en ESXi
+      #     "VM Network": "VM Network"  # NIC 2 del OVF  -> portgroup en ESXi
+      #   disk_provisioning: thin
+      #   power_on: true
 
       - name: "Ubuntu-pc01"
-        ovf: "/mnt/d/Backup/LABACAD/ubuntu/ubuntu.ovf"   # o .ova
+        ovf: "/mnt/d/Backup/LABACAD/ubuntu/ubuntuG01.ovf"   # o .ova
         networks:
           "vSW_G01": "vSW_G01"
         disk_provisioning: thin

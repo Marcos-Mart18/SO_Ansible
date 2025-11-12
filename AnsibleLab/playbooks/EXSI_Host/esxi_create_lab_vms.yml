@@ -17,27 +17,40 @@
     pg_extra: "VM Network"
 
     vms:
-      - name: "ubuntuG01"
+      # - name: "ubuntuG01"
+      #   guest_id: "ubuntu64Guest"
+      #   memory_mb: 8192
+      #   num_cpus: 4
+      #   disk_gb: 60
+      #   iso_file: "ubuntu-24.04.3-desktop-amd64.iso"
+      #   networks:
+      #     - name: "{{ pg_main }}"
+      #       start_connected: true
+      #       device_type: vmxnet3
+    
+      - name: "UbuntuAnsible"
         guest_id: "ubuntu64Guest"
         memory_mb: 8192
         num_cpus: 4
-        disk_gb: 60
+        disk_gb: 15
         iso_file: "ubuntu-24.04.3-desktop-amd64.iso"
         networks:
-          - name: "{{ pg_main }}"
+          - name: "{{ pg_extra }}"
             start_connected: true
             device_type: vmxnet3
+      
     
-      - name: "server-debian"
-        guest_id: "debian8_64Guest"
-        memory_mb: 8192
-        num_cpus: 4
-        disk_gb: 60
-        iso_file: "debian-13.1.0-amd64-netinst.iso"
-        networks:
-          - name: "{{ pg_main }}"
-            start_connected: true
-            device_type: vmxnet3
+    
+      # - name: "server-debian"
+      #   guest_id: "debian8_64Guest"
+      #   memory_mb: 8192
+      #   num_cpus: 4
+      #   disk_gb: 60
+      #   iso_file: "debian-13.1.0-amd64-netinst.iso"
+      #   networks:
+      #     - name: "{{ pg_main }}"
+      #       start_connected: true
+      #       device_type: vmxnet3
 
       - name: "win11G01"
         guest_id: "windows11_64Guest"

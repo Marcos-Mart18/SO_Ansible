@@ -16,13 +16,26 @@
     # === VMs a desplegar desde tu PC (OVF/OVA locales) ===
     vm_defs:
       - name: "WindowsSERVER2022_G01"
-        ovf: "/mnt/d/Backup/WindowsSERVER2022_G01/WinSERVER2022_G01.ovf"   # o .ova
+        ovf: "/mnt/d/Backup/GAMECENTER/WindowsSERVER2022_G01/WinSERVER2022_G01.ovf"   # o .ova
         networks:
           "vSW_G01": "vSW_G01"        # NIC 1 del OVF  -> portgroup en ESXi
           "VM Network": "VM Network"  # NIC 2 del OVF  -> portgroup en ESXi
         disk_provisioning: thin
         power_on: true
 
+      - name: "Bazzite_pc02_g01"
+        ovf: "/mnt/d/Backup/GAMECENTER/Bazzite_pc02_g01/Bazzite_pc02_g01.ovf"   # o .ova
+        networks:
+          "vSW_G01": "vSW_G01"        # NIC 1 del OVF  -> portgroup en ESXi
+        disk_provisioning: thin
+        power_on: true
+
+      - name: "Windows11Pro_pc01_G01"
+        ovf: "/mnt/d/Backup/GAMECENTER/Windows11Pro_pc01_G01/Windows11Pro_pc01_G01.ovf"   # o .ova
+        networks:
+          "vSW_G01": "vSW_G01"        # NIC 1 del OVF  -> portgroup en ESXi
+        disk_provisioning: thin
+        power_on: true
       # Agrega más VMs si quieres...
 
     # Reintentos para leer info (por si arranca lento)
