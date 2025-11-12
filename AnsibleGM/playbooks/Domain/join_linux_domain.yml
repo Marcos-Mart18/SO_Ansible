@@ -42,7 +42,7 @@
         msg: "Reinicio automático previo al join al dominio gamecenter.lan"
         reboot_timeout: 600
 
-    - name: Configurar systemd-resolved para usar el DC como DNS principal IPv6
+    - name: Configurar systemd
       ansible.builtin.copy:
         dest: /etc/systemd/resolved.conf
         content: |
