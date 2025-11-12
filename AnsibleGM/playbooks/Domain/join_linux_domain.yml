@@ -28,7 +28,8 @@
       loop_control:
         loop_var: item
 
-    - name: Verificar la salida de rpm-ostree
+    - name: 
+      Debug: Verificar la salida de rpm-ostree
       ansible.builtin.debug:
         var: package_status
 
@@ -36,7 +37,7 @@
       ansible.builtin.shell:
         cmd: rpm-ostree install {{ item }}
       loop: "{{ pkgs }}"
-      when: "'{{ item }}' not in package_status.stdout"
+      when: "'{{ item }}' not in package_status.stdout"  # Esto puede necesitar ser ajustado basado en el resultado del debug
       become: true
 
     - name: Apuntar resolv.conf al DC (temporal y simple)
