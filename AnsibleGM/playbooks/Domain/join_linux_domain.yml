@@ -5,7 +5,6 @@
     domain_name: "gamecenter.lan"
     dc_dns_v6: "2025:db8:1::2"
     dc_dns_v4: "10.10.10.2"
-    # el paquete puede variar levemente según derivado, esto funciona en Fedora/Bazzite
     pkgs:
       - realmd
       - sssd
@@ -17,12 +16,15 @@
       - samba-common-tools
       - krb5-workstation
       - sssd-ad
-    ansible_python_interceptor: "/usr/bin/python3"
+    ansible_python_interpreter: "/usr/bin/python3"
+
   tasks:
-    - name: Instalar paquetes de dominio
-      ansible.builtin.package:
-        name: "{{ pkgs }}"
-        state: present
+    - name: Instalar paquetes de dominio con rpm-ostree
+      ansible.builtin.shell:
+        cmd: |
+          rpm-ostree install {{ item }}
+      loop: "{{ pkgs }}"
+      become: true
 
     - name: Apuntar resolv.conf al DC (temporal y simple)
       ansible.builtin.copy:
