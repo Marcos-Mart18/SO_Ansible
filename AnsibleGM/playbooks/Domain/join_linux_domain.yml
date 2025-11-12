@@ -17,6 +17,7 @@
       - samba-common-tools
       - krb5-workstation
       - sssd-ad
+    ansible_python_interceptor: "/usr/bin/python3"
   tasks:
     - name: Instalar paquetes de dominio
       ansible.builtin.package:
