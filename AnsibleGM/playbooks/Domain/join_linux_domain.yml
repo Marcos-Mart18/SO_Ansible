@@ -19,7 +19,7 @@
     ansible_python_interpreter: "/usr/bin/python3"
 
   tasks:
-    - name: Verificar si cada paquete está instalado
+    - name: Verificar si el paquete realmd está instalado
       ansible.builtin.command:
         cmd: rpm-ostree status | grep "{{ item }}"
       register: package_status
@@ -27,6 +27,10 @@
       loop: "{{ pkgs }}"
       loop_control:
         loop_var: item
+
+    - name: Verificar la salida de rpm-ostree
+      ansible.builtin.debug:
+        var: package_status
 
     - name: Instalar paquetes no instalados
       ansible.builtin.shell:
