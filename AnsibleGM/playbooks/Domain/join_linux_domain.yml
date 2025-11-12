@@ -21,23 +21,21 @@
   tasks:
     - name: Verificar si el paquete realmd está instalado
       ansible.builtin.command:
-        cmd: rpm-ostree status | grep "{{ item }}"
-      register: package_status
+        cmd: rpm-ostree status | grep realmd
+      register: realmd_status
       failed_when: false
-      loop: "{{ pkgs }}"
-      loop_control:
-        loop_var: item
 
-    - name: 
-      Debug: Verificar la salida de rpm-ostree
-      ansible.builtin.debug:
-        var: package_status
+    - name: Instalar realmd si no está instalado
+      ansible.builtin.shell:
+        cmd: rpm-ostree install realmd
+      when: realmd_status.stdout == ""
+      become: true
 
-    - name: Instalar paquetes no instalados
+    - name: Instalar otros paquetes de dominio si no están instalados
       ansible.builtin.shell:
         cmd: rpm-ostree install {{ item }}
-      loop: "{{ pkgs }}"
-      when: "'{{ item }}' not in package_status.stdout"  # Esto puede necesitar ser ajustado basado en el resultado del debug
+      loop: "{{ pkgs[1:] }}"  # Empezamos desde el segundo paquete, ya que realmd se maneja aparte
+      when: item != "realmd"
       become: true
 
     - name: Apuntar resolv.conf al DC (temporal y simple)
