@@ -34,23 +34,35 @@
     - name: Instalar otros paquetes de dominio si no están instalados
       ansible.builtin.shell:
         cmd: rpm-ostree install {{ item }}
-      loop: "{{ pkgs[1:] }}"  # Empezamos desde el segundo paquete, ya que realmd se maneja aparte
-      when: item != "realmd"
+      loop: "{{ pkgs[1:] }}"
       become: true
 
-    - name: Apuntar resolv.conf al DC (temporal y simple)
+    - name: Reiniciar Bazzite antes de unir al dominio
+      ansible.builtin.reboot:
+        msg: "Reinicio automático previo al join al dominio gamecenter.lan"
+        reboot_timeout: 600
+
+    - name: Configurar systemd-resolved para usar el DC como DNS principal IPv6
       ansible.builtin.copy:
-        dest: /etc/resolv.conf
+        dest: /etc/systemd/resolved.conf
         content: |
-          search {{ domain_name }}
-          nameserver {{ dc_dns_v6 }}
-          nameserver {{ dc_dns_v4 }}
+          [Resolve]
+          DNS={{ dc_dns_v6 }}
+          FallbackDNS=2001:4860:4860::8888 2001:4860:4860::8844
+          Domains={{ domain_name }}
         mode: '0644'
+
+    - name: Habilitar y reiniciar systemd-resolved
+      ansible.builtin.service:
+        name: systemd-resolved
+        state: restarted
+        enabled: yes
 
     - name: Descubrir el dominio
       ansible.builtin.command: realm discover {{ domain_name }}
       register: discover
       changed_when: false
+
 
     - name: Unir al dominio (usando Administrator)
       ansible.builtin.expect:
