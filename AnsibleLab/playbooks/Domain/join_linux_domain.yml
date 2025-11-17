@@ -1,0 +1,126 @@
+- hosts: ubuntu_clients          # <- grupo de tus Ubuntu en el inventario
+  become: true
+  gather_facts: yes
+
+  vars:
+    domain_name: "lab_academico.lan"
+    realm_name:  "LAB_ACADEMICO.LAN"
+
+    dc_dns_v4: "20.20.20.2"
+    dc_dns_v6: "2025:db8:2::2"
+
+    ad_join_user: "administrator"
+    ad_join_password: "Noisrimo27!"
+    pkgs:
+      - realmd
+      - sssd
+      - sssd-tools
+      - adcli
+      - oddjob
+      - oddjob-mkhomedir
+      - samba-common
+      - samba-common-bin
+      - krb5-user
+      - packagekit
+      - libnss-sss
+      - libpam-sss
+
+    ansible_python_interpreter: "/usr/bin/python3"
+
+  tasks:
+    # ---------------- Paquetes ----------------
+    - name: Actualizar cache de APT
+      ansible.builtin.apt:
+        update_cache: yes
+      tags: [packages]
+
+    - name: Instalar paquetes necesarios para unirse al dominio
+      ansible.builtin.apt:
+        name: "{{ pkgs }}"
+        state: present
+      tags: [packages]
+
+    # ---------------- DNS -> nuestro DC ----------------
+    - name: Configurar systemd-resolved para usar el DC como DNS
+      ansible.builtin.copy:
+        dest: /etc/systemd/resolved.conf
+        mode: '0644'
+        content: |
+          [Resolve]
+          DNS={{ dc_dns_v4 }} {{ dc_dns_v6 }}
+          FallbackDNS=8.8.8.8 2001:4860:4860::8888
+          Domains={{ domain_name }}
+          DNSSEC=no
+      notify: restart resolved
+      tags: [dns]
+
+    - name: Asegurar que systemd-resolved está habilitado
+      ansible.builtin.service:
+        name: systemd-resolved
+        state: started
+        enabled: yes
+      tags: [dns]
+
+    # ---------------- Descubrir / unir al dominio ----------------
+    - name: Comprobar que el dominio se puede descubrir
+      ansible.builtin.command: realm discover {{ domain_name }}
+      register: discover
+      changed_when: false
+      failed_when: discover.rc != 0
+      tags: [join]
+
+    - name: Unir al dominio con realm join
+      ansible.builtin.expect:
+        command: >
+          realm join --verbose {{ domain_name }}
+          -U {{ ad_join_user }}
+        responses:
+          (?i)Password for *: "{{ ad_join_password }}"
+      register: join_result
+      changed_when: "'already joined' not in join_result.stdout"
+      tags: [join]
+
+    # ---------------- SSSD / HOME dirs ----------------
+    - name: Ajustar override_homedir en sssd.conf
+      ansible.builtin.lineinfile:
+        path: /etc/sssd/sssd.conf
+        regexp: '^override_homedir ='
+        line: 'override_homedir = /home/%d/%u'
+        insertafter: '^\[domain/'
+        create: no
+        backrefs: no
+      notify: restart sssd
+      tags: [sssd]
+
+    - name: Asegurar permisos correctos de sssd.conf
+      ansible.builtin.file:
+        path: /etc/sssd/sssd.conf
+        mode: '0600'
+      tags: [sssd]
+
+    - name: Habilitar creación de home con pam_mkhomedir (common-session)
+      ansible.builtin.lineinfile:
+        path: /etc/pam.d/common-session
+        regexp: '^session\s+required\s+pam_mkhomedir.so'
+        line: 'session required pam_mkhomedir.so skel=/etc/skel/ umask=0077'
+        insertafter: '^session\s+required\s+pam_unix.so'
+      tags: [pam]
+
+    - name: Habilitar creación de home con pam_mkhomedir (common-session-noninteractive)
+      ansible.builtin.lineinfile:
+        path: /etc/pam.d/common-session-noninteractive
+        regexp: '^session\s+required\s+pam_mkhomedir.so'
+        line: 'session required pam_mkhomedir.so skel=/etc/skel/ umask=0077'
+        insertafter: '^session\s+required\s+pam_unix.so'
+      tags: [pam]
+
+  handlers:
+    - name: restart sssd
+      ansible.builtin.service:
+        name: sssd
+        state: restarted
+
+    - name: restart resolved
+      ansible.builtin.service:
+        name: systemd-resolved
+        state: restarted

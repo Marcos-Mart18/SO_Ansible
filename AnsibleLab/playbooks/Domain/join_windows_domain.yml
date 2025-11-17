@@ -1,0 +1,41 @@
+- hosts: win11esxi
+  gather_facts: no
+  collections:
+    - ansible.windows
+
+  vars:
+    domain_name: "lab_academico.lan"
+    netbios_name: "ACADEMICO"
+
+    # Usuario de dominio con permisos para unir equipos
+    # Puedes usar también: Administrator@lab_academico.lan
+    domain_admin_user: "ACADEMICO\\Administrator"
+    domain_admin_pass: "Noisrimo27!"    # pon aquí la real del Administrator
+
+    # IPs del DC/DNS (tu Debian)
+    dc_dns_v4: "20.20.20.2"
+    dc_dns_v6: "2025:db8:2::2"
+
+    # Nombre de la interfaz en Windows (ajusta si no coincide)
+    nic_alias: "Ethernet0"
+
+  tasks:
+    - name: Apuntar DNS del cliente al DC (IPv4 e IPv6)
+      ansible.windows.win_dns_client:
+        adapter_names: "{{ nic_alias }}"
+        ipv4_addresses:
+          - "{{ dc_dns_v4 }}"
+        ipv6_addresses:
+          - "{{ dc_dns_v6 }}"
+
+    - name: Unir el equipo al dominio LAB_ACADEMICO.LAN
+      ansible.windows.win_domain_membership:
+        dns_domain_name: "{{ domain_name }}"
+        domain_admin_user: "{{ domain_admin_user }}"
+        domain_admin_password: "{{ domain_admin_pass }}"
+        state: domain
+      register: join_out
+
+    - name: Reiniciar si es necesario después del join
+      ansible.windows.win_reboot:
+      when: join_out.reboot_required | default(false)

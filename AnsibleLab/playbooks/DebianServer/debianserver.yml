@@ -10,9 +10,9 @@
 
     # Dominio (Samba AD)
     domain_name: "lab_academico.lan"
-    ad_realm: "ACADEMICO.LAN"        # LAB_ACADEMICO.LAN
+    ad_realm: "LAB_ACADEMICO.LAN"      
     ad_netbios: "ACADEMICO"
-    ad_admin_password: "{{ ansible_password }}"  # Debe cumplir complejidad
+    ad_admin_password: "Noisrimo27!"  # Debe cumplir complejidad
 
     # IPv4 LAN (referencia para DHCP/NAT; NO cambiamos IPs de NICs)
     ipv4_lan_ip: "20.20.20.2"
@@ -22,17 +22,17 @@
     ipv4_router: "20.20.20.2"     # router que anunciará DHCPv4
 
     # IPv6 LAN
-    ipv6_addr: "2025:db8:2::1"   # IP del servidor
+    ipv6_addr: "2025:db8:2::2"   # IP del servidor
     ipv6_prefix: 64
     dhcpv6_prefix: "2025:db8:2::"
     dhcpv6_prefix_len: 64
-    dhcpv6_start: "2025:db8:2::50"
-    dhcpv6_end:   "2025:db8:2::70"
+    dhcpv6_start: "2025:db8:2::100"
+    dhcpv6_end:   "2025:db8:2::200"
 
     # DHCPv4 pool
     dhcpv4_scope_name: "LANv4"
-    dhcpv4_start: "20.20.20.50"
-    dhcpv4_end:   "20.20.20.70"
+    dhcpv4_start: "20.20.20.100"
+    dhcpv4_end:   "20.20.20.200"
     dhcpv4_lease_days: 7
 
     # NAT44
@@ -81,10 +81,11 @@
       ansible.builtin.file:
         path: /etc/samba/smb.conf
         state: absent
+      when: not samba_prov.stat.exists
       tags: [ad]
 
 
-    - name: Provisionar dominio Samba AD DC (LAB_ACADEMICO.LAN)
+    - name: Provisionar dominio Samba AD DC
       ansible.builtin.command: >
         samba-tool domain provision
         --use-rfc2307
@@ -92,7 +93,7 @@
         --domain={{ ad_netbios }}
         --server-role=dc
         --dns-backend=SAMBA_INTERNAL
-        --adminpass='Adm!n2025#'
+        --adminpass='{{ ad_admin_password }}'
       args:
         creates: /var/lib/samba/sysvol
       when: not samba_prov.stat.exists
@@ -117,6 +118,24 @@
         insertafter: '^\[global\]'
       notify: Restart samba-ad-dc
       tags: [ad]
+    
+    - name: Desactivar gestión de DNS por NetworkManager
+      ansible.builtin.lineinfile:
+        path: /etc/NetworkManager/NetworkManager.conf
+        regexp: '^dns='
+        line: 'dns=none'
+        insertafter: '^\[main\]'
+      notify: Restart NetworkManager
+      tags: [ad, dns]
+
+    - name: Configurar resolv.conf para usar DNS local de Samba
+      ansible.builtin.copy:
+        dest: /etc/resolv.conf
+        mode: '0644'
+        content: |
+          nameserver 127.0.0.1
+          search {{ domain_name }}
+      tags: [ad, dns]
 
     - name: Habilitar y arrancar samba-ad-dc
       ansible.builtin.service:
@@ -138,16 +157,16 @@
               "valid-lifetime": 4000,
               "subnet4": [
                 {
+                  "id":1,
                   "subnet": "{{ ipv4_lan_net }}/{{ ipv4_lan_prefix }}",
-                  "pools": [ { "pool": "{{ dhcpv4_start }} - {{ dhcpv4_end }}" } ],
+                  "pools": [ { "pool": "{{ dhcpv4_start }}-{{ dhcpv4_end }}" } ],
                   "option-data": [
                     { "name": "routers", "data": "{{ ipv4_router }}" },
                     { "name": "domain-name-servers", "data": "{{ ipv4_lan_ip }}" },
                     { "name": "domain-name", "data": "{{ domain_name }}" }
                   ]
                 }
-              ],
-              "control-socket": { "socket-type": "unix", "socket-name": "/run/kea/kea4-ctrl.sock" }
+              ]
             }
           }
       notify: Restart kea4
@@ -174,6 +193,7 @@
               "valid-lifetime": 4000,
               "subnet6": [
                 {
+                  "id":1,
                   "subnet": "{{ dhcpv6_prefix }}/{{ dhcpv6_prefix_len }}",
                   "pools": [ { "pool": "{{ dhcpv6_start }} - {{ dhcpv6_end }}" } ],
                   "option-data": [
@@ -181,8 +201,7 @@
                     { "name": "domain-search", "data": "{{ domain_name }}" }
                   ]
                 }
-              ],
-              "control-socket": { "socket-type": "unix", "socket-name": "/run/kea/kea6-ctrl.sock" }
+              ]
             }
           }
       notify: Restart kea6
@@ -223,13 +242,15 @@
       tags: [dhcpv6, ipv6]
 
     # ---------------- NAT44 (nftables) ----------------
-    - name: Habilitar IPv4 forwarding
-      ansible.builtin.sysctl:
-        name: net.ipv4.ip_forward
-        value: '1'
-        state: present
-        reload: yes
+    - name: Habilitar IPv4 forwarding (permanente)
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/99-ipforward.conf
+        mode: '0644'
+        content: |
+          net.ipv4.ip_forward=1
+      notify: Reload sysctl
       tags: [nat]
+
 
     - name: Asegurar include de snippets en nftables.conf
       ansible.builtin.lineinfile:
@@ -312,3 +333,7 @@
 
     - name: Reload nftables
       ansible.builtin.command: nft -f /etc/nftables.conf
+    
+    - name: Reload sysctl
+      ansible.builtin.command: sysctl --system
+
