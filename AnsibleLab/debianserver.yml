@@ -10,16 +10,16 @@
 
     # Dominio (Samba AD)
     domain_name: "lab_academico.lan"
-    ad_realm: "{{ domain_name | upper }}"        # LAB_ACADEMICO.LAN
+    ad_realm: "ACADEMICO.LAN"        # LAB_ACADEMICO.LAN
     ad_netbios: "ACADEMICO"
     ad_admin_password: "{{ ansible_password }}"  # Debe cumplir complejidad
 
     # IPv4 LAN (referencia para DHCP/NAT; NO cambiamos IPs de NICs)
-    ipv4_lan_ip: "20.20.1.2"
+    ipv4_lan_ip: "20.20.20.2"
     ipv4_lan_prefix: 24
-    ipv4_lan_net: "20.20.1.0"
+    ipv4_lan_net: "20.20.20.0"
     ipv4_mask: "255.255.255.0"
-    ipv4_router: "20.20.1.1"     # router que anunciará DHCPv4
+    ipv4_router: "20.20.20.2"     # router que anunciará DHCPv4
 
     # IPv6 LAN
     ipv6_addr: "2025:db8:2::1"   # IP del servidor
@@ -31,8 +31,8 @@
 
     # DHCPv4 pool
     dhcpv4_scope_name: "LANv4"
-    dhcpv4_start: "20.20.1.50"
-    dhcpv4_end:   "20.20.1.70"
+    dhcpv4_start: "20.20.20.50"
+    dhcpv4_end:   "20.20.20.70"
     dhcpv4_lease_days: 7
 
     # NAT44
