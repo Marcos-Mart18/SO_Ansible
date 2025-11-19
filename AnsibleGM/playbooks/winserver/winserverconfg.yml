@@ -4,7 +4,7 @@
 
   vars:
     lan_nic_alias: "LAN"            # LAN
-    wan_nic_alias: "WAN"          # WAN
+    wan_nic_alias: "WAN"            # WAN
     domain_name: "gamecenter.lan"
     dsrm_password: "{{ ansible_password }}"
     ipv4_lan_ip: "10.10.10.2"
@@ -172,8 +172,8 @@
           if ($existing) { Remove-NetNat -Name $natName -Confirm:$false -ErrorAction SilentlyContinue }
           New-NetNat -Name $natName -InternalIPInterfaceAddressPrefix $prefix -ExternalIPInterfaceIndex $wanIdx | Out-Null
 
-    # --- IIS (opcional) ---
-    - name: Instalar IIS
+    # --- IIS + FTP ---
+    - name: Instalar IIS + FTP
       ansible.windows.win_feature:
         name:
           - Web-Server
@@ -189,6 +189,9 @@
           - Web-Stat-Compression
           - Web-Filtering
           - Web-Mgmt-Console
+          - Web-FTP-Server
+          - Web-Ftp-Service
+          - Web-Ftp-Ext
         include_management_tools: yes
         state: present
 
@@ -201,6 +204,52 @@
           <p>Configurado automáticamente con Ansible en Windows Server 2022.</p>
           </body></html>
         dest: "C:\\inetpub\\wwwroot\\index.html"
+
+    # --- Carpeta y sitio FTP ---
+    - name: Crear carpeta para FTP
+      ansible.windows.win_file:
+        path: "C:\\FTPShare"
+        state: directory
+
+    - name: Configurar sitio FTP GameCenter
+      ansible.windows.win_powershell:
+        script: |
+          Import-Module WebAdministration
+          $siteName = "GameCenterFTP"
+          $ftpPath  = "C:\FTPShare"
+
+          if (-not (Test-Path "IIS:\Sites\$siteName")) {
+            New-Item "IIS:\Sites\$siteName" -bindings @{protocol="ftp";bindingInformation="*:21:"} -physicalPath $ftpPath | Out-Null
+          } else {
+            Set-ItemProperty "IIS:\Sites\$siteName" -Name physicalPath -Value $ftpPath
+          }
+
+          # Arrancar automáticamente
+          Set-ItemProperty "IIS:\Sites\$siteName" -Name serverAutoStart -Value $true
+
+          # Activar autenticación básica y desactivar anónima
+          Set-ItemProperty "IIS:\Sites\$siteName" -Name ftpServer.security.authentication.anonymousAuthentication.enabled -Value $false
+          Set-ItemProperty "IIS:\Sites\$siteName" -Name ftpServer.security.authentication.basicAuthentication.enabled -Value $true
+
+          # Permitir lectura y escritura a todos los usuarios autenticados
+          Clear-WebConfiguration -PSPath 'IIS:\' -Filter "system.ftpServer/security/authorization" -Location $siteName -ErrorAction SilentlyContinue
+          Add-WebConfiguration -PSPath 'IIS:\' -Filter "system.ftpServer/security/authorization" -Value @{
+            accessType="Allow";
+            roles="";
+            users="*";
+            permissions="Read,Write"
+          } -Location $siteName
+
+    - name: Habilitar servicio FTP y firewall
+      ansible.windows.win_powershell:
+        script: |
+          Set-Service -Name ftpsvc -StartupType Automatic
+          Start-Service -Name ftpsvc -ErrorAction SilentlyContinue
+
+          # Reglas de firewall para FTP
+          Enable-NetFirewallRule -DisplayGroup "FTP Server" -ErrorAction SilentlyContinue
+          New-NetFirewallRule -DisplayName "FTP Port 21 Inbound" -Direction Inbound -Protocol TCP -LocalPort 21 -Action Allow -ErrorAction SilentlyContinue
+      changed_when: false
 
     # --- WinRM ---
     - name: Asegurar WinRM HTTP permitido

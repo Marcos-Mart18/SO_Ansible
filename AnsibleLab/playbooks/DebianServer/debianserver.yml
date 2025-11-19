@@ -5,8 +5,8 @@
 
   vars:
     # Interfaces (ajusta según tu VM)
-    lan_if: "enp0s3"
-    wan_if: "enp0s8"
+    lan_if: "ens192"
+    wan_if: "ens224"
 
     # Dominio (Samba AD)
     domain_name: "lab_academico.lan"
@@ -336,4 +336,11 @@
     
     - name: Reload sysctl
       ansible.builtin.command: sysctl --system
+
+    - name: Restart NetworkManager
+      become: yes
+      ansible.builtin.service:
+        name: NetworkManager      # o 'network-manager' en Debian, mira nota de abajo
+        state: restarted
+
 
