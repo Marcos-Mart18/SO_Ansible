@@ -46,15 +46,6 @@
         propagation: None
         state: present
 
-    # (Opcional) Si quisieras quitar una ACE concreta, usa state: absent con los mismos parámetros:
-    # - name: Quitar permisos heredados/ACE indeseados (ejemplo)
-    #   ansible.windows.win_acl:
-    #     path: "{{ carpeta_objetivo }}"
-    #     user: "Usuarios"              # o SID S-1-5-32-545
-    #     rights: ReadAndExecute
-    #     type: allow
-    #     state: absent
-
     # ---------- DERECHOS DE USUARIO (User Rights Assignment) ----------
     - name: Permitir inicio de sesión por Escritorio Remoto a {{ grupo_local_destino }}
       ansible.windows.win_user_right:

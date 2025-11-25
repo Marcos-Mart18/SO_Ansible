@@ -10,7 +10,7 @@
 
     # Dominio (Samba AD)
     domain_name: "lab_academico.lan"
-    ad_realm: "LAB_ACADEMICO.LAN"      
+    ad_realm: "LAB_ACADEMICO.LAN"
     ad_netbios: "ACADEMICO"
     ad_admin_password: "Noisrimo27!"  # Debe cumplir complejidad
 
@@ -76,14 +76,13 @@
         path: /var/lib/samba/sysvol
       register: samba_prov
       tags: [ad]
-    
+
     - name: Eliminar smb.conf previo si existe
       ansible.builtin.file:
         path: /etc/samba/smb.conf
         state: absent
       when: not samba_prov.stat.exists
       tags: [ad]
-
 
     - name: Provisionar dominio Samba AD DC
       ansible.builtin.command: >
@@ -111,6 +110,7 @@
       tags: [ad]
 
     - name: Añadir forwarders DNS en smb.conf (8.8.8.8 / 1.1.1.1)
+    # ojo: este smb.conf lo creó el provision
       ansible.builtin.lineinfile:
         path: /etc/samba/smb.conf
         regexp: '^\s*dns forwarder ='
@@ -118,7 +118,7 @@
         insertafter: '^\[global\]'
       notify: Restart samba-ad-dc
       tags: [ad]
-    
+
     - name: Desactivar gestión de DNS por NetworkManager
       ansible.builtin.lineinfile:
         path: /etc/NetworkManager/NetworkManager.conf
@@ -143,6 +143,33 @@
         state: started
         enabled: yes
       tags: [ad]
+
+    # ---------------- Carpeta compartida para el dominio ----------------
+    - name: Crear carpeta compartida Samba
+      ansible.builtin.file:
+        path: /srv/compartido
+        state: directory
+        owner: root
+        group: root
+        mode: '0775'
+      tags: [samba_share]
+
+    - name: Definir recurso compartido [COMPARTIDO] en smb.conf
+      ansible.builtin.blockinfile:
+        path: /etc/samba/smb.conf
+        insertafter: EOF
+        block: |
+          [COMPARTIDO]
+              path = /srv/compartido
+              read only = no
+              browsable = yes
+              guest ok = no
+              # Cualquier usuario del dominio {{ ad_netbios }}
+              valid users = @"{{ ad_netbios }}\\Domain Users"
+              create mask = 0660
+              directory mask = 0770
+      notify: Restart samba-ad-dc
+      tags: [samba_share]
 
     # ---------------- KEA DHCPv4 ----------------
     - name: Configurar Kea DHCPv4
@@ -251,7 +278,6 @@
       notify: Reload sysctl
       tags: [nat]
 
-
     - name: Asegurar include de snippets en nftables.conf
       ansible.builtin.lineinfile:
         path: /etc/nftables.conf
@@ -333,14 +359,12 @@
 
     - name: Reload nftables
       ansible.builtin.command: nft -f /etc/nftables.conf
-    
+
     - name: Reload sysctl
       ansible.builtin.command: sysctl --system
 
     - name: Restart NetworkManager
       become: yes
       ansible.builtin.service:
-        name: NetworkManager      # o 'network-manager' en Debian, mira nota de abajo
+        name: NetworkManager      # o 'network-manager' en Debian, según tu sistema
         state: restarted
-
-

@@ -211,6 +211,16 @@
         path: "C:\\FTPShare"
         state: directory
 
+    - name: Dar permisos NTFS a Domain Users sobre C:\FTPShare
+      ansible.windows.win_acl:
+        path: "C:\\FTPShare"
+        user: "DC-GAMECENTER\\Domain Users"   # ajusta si tu NETBIOS no es GAMECENTER
+        rights: Modify
+        type: allow
+        inherit: ContainerInherit, ObjectInherit
+        propagation: None
+        state: present
+
     - name: Configurar sitio FTP GameCenter
       ansible.windows.win_powershell:
         script: |
